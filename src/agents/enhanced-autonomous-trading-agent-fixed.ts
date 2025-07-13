@@ -73,7 +73,7 @@ export class AutonomousTradingAgent
             temperature: 0.1,
 
         });
-    }    async generateCompletePrediction(
+    } async generateCompletePrediction(
         symbol: string,
         timeframe: string,
         currentPrice: number,
@@ -83,9 +83,9 @@ export class AutonomousTradingAgent
     {
         // Generate multi-timeframe analysis data
         const multiTimeframeData = this.generateMultiTimeframeData(symbol, currentPrice, marketFeatures);
-        
+
         // Analyze candlestick patterns with real OHLC data if available
-        const candlestickAnalysis = candleData && candleData.length >= 10 
+        const candlestickAnalysis = candleData && candleData.length >= 10
             ? this.analyzeCandlestickPatternsFromOHLC(candleData)
             : this.getDefaultCandlestickAnalysis();
         const patternInterpretation = this.interpretCandlestickSignals(candlestickAnalysis);
@@ -729,13 +729,15 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
     /**
      * Analyze candlestick patterns using real OHLC data and technical indicators library
      */
-    private analyzeCandlestickPatternsFromOHLC(candleData: DerivCandleData[]): {
-        patterns: string[];
-        bullishSignals: string[];
-        bearishSignals: string[];
-        patternStrength: number;
-        patternConfidence: number;
-    } {
+    private analyzeCandlestickPatternsFromOHLC(candleData: DerivCandleData[]):
+        {
+            patterns: string[];
+            bullishSignals: string[];
+            bearishSignals: string[];
+            patternStrength: number;
+            patternConfidence: number;
+        }
+    {
         if (candleData.length < 10) {
             return this.getDefaultCandlestickAnalysis();
         }
@@ -754,13 +756,13 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
 
         // Use last 20 candles for pattern analysis
         const recentCandles = ohlcData.slice(-20);
-        const lastCandle = recentCandles[recentCandles.length - 1];
-        const secondLastCandle = recentCandles[recentCandles.length - 2];
-        const thirdLastCandle = recentCandles[recentCandles.length - 3];
+        const lastCandle = recentCandles[ recentCandles.length - 1 ];
+        const secondLastCandle = recentCandles[ recentCandles.length - 2 ];
+        const thirdLastCandle = recentCandles[ recentCandles.length - 3 ];
 
         try {
             // BULLISH PATTERNS
-            
+
             // Hammer pattern detection
             const hammerResult = TA.hammerpattern({
                 open: recentCandles.map(c => c.open),
@@ -768,7 +770,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (hammerResult && hammerResult[hammerResult.length - 1]) {
+            if (hammerResult && hammerResult[ hammerResult.length - 1 ]) {
                 patterns.push("Hammer");
                 bullishSignals.push("Potential bullish reversal");
             }
@@ -780,7 +782,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bullishHammerResult && bullishHammerResult[bullishHammerResult.length - 1]) {
+            if (bullishHammerResult && bullishHammerResult[ bullishHammerResult.length - 1 ]) {
                 patterns.push("Bullish Hammer");
                 bullishSignals.push("Confirmed bullish reversal");
             }
@@ -792,7 +794,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bullishInvertedHammerResult && bullishInvertedHammerResult[bullishInvertedHammerResult.length - 1]) {
+            if (bullishInvertedHammerResult && bullishInvertedHammerResult[ bullishInvertedHammerResult.length - 1 ]) {
                 patterns.push("Bullish Inverted Hammer");
                 bullishSignals.push("Potential bullish reversal");
             }
@@ -804,7 +806,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bullishEngulfingResult && bullishEngulfingResult[bullishEngulfingResult.length - 1]) {
+            if (bullishEngulfingResult && bullishEngulfingResult[ bullishEngulfingResult.length - 1 ]) {
                 patterns.push("Bullish Engulfing");
                 bullishSignals.push("Strong bullish reversal signal");
             }
@@ -816,7 +818,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (morningStarResult && morningStarResult[morningStarResult.length - 1]) {
+            if (morningStarResult && morningStarResult[ morningStarResult.length - 1 ]) {
                 patterns.push("Morning Star");
                 bullishSignals.push("Three-candle bullish reversal");
             }
@@ -828,7 +830,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (morningDojiStarResult && morningDojiStarResult[morningDojiStarResult.length - 1]) {
+            if (morningDojiStarResult && morningDojiStarResult[ morningDojiStarResult.length - 1 ]) {
                 patterns.push("Morning Doji Star");
                 bullishSignals.push("Strong bullish reversal with doji");
             }
@@ -842,7 +844,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (shootingStarResult && shootingStarResult[shootingStarResult.length - 1]) {
+            if (shootingStarResult && shootingStarResult[ shootingStarResult.length - 1 ]) {
                 patterns.push("Shooting Star");
                 bearishSignals.push("Potential bearish reversal");
             }
@@ -854,7 +856,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bearishHammerResult && bearishHammerResult[bearishHammerResult.length - 1]) {
+            if (bearishHammerResult && bearishHammerResult[ bearishHammerResult.length - 1 ]) {
                 patterns.push("Bearish Hammer");
                 bearishSignals.push("Confirmed bearish reversal");
             }
@@ -866,7 +868,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bearishInvertedHammerResult && bearishInvertedHammerResult[bearishInvertedHammerResult.length - 1]) {
+            if (bearishInvertedHammerResult && bearishInvertedHammerResult[ bearishInvertedHammerResult.length - 1 ]) {
                 patterns.push("Bearish Inverted Hammer");
                 bearishSignals.push("Potential bearish reversal");
             }
@@ -878,7 +880,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (bearishEngulfingResult && bearishEngulfingResult[bearishEngulfingResult.length - 1]) {
+            if (bearishEngulfingResult && bearishEngulfingResult[ bearishEngulfingResult.length - 1 ]) {
                 patterns.push("Bearish Engulfing");
                 bearishSignals.push("Strong bearish reversal signal");
             }
@@ -890,7 +892,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (eveningStarResult && eveningStarResult[eveningStarResult.length - 1]) {
+            if (eveningStarResult && eveningStarResult[ eveningStarResult.length - 1 ]) {
                 patterns.push("Evening Star");
                 bearishSignals.push("Three-candle bearish reversal");
             }
@@ -902,7 +904,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (eveningDojiStarResult && eveningDojiStarResult[eveningDojiStarResult.length - 1]) {
+            if (eveningDojiStarResult && eveningDojiStarResult[ eveningDojiStarResult.length - 1 ]) {
                 patterns.push("Evening Doji Star");
                 bearishSignals.push("Strong bearish reversal with doji");
             }
@@ -916,7 +918,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (dojiResult && dojiResult[dojiResult.length - 1]) {
+            if (dojiResult && dojiResult[ dojiResult.length - 1 ]) {
                 patterns.push("Doji");
             }
 
@@ -927,7 +929,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (dragonflyDojiResult && dragonflyDojiResult[dragonflyDojiResult.length - 1]) {
+            if (dragonflyDojiResult && dragonflyDojiResult[ dragonflyDojiResult.length - 1 ]) {
                 patterns.push("Dragonfly Doji");
                 bullishSignals.push("Potential bullish reversal doji");
             }
@@ -939,17 +941,17 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 low: recentCandles.map(c => c.low),
                 close: recentCandles.map(c => c.close)
             });
-            if (gravestoneDojiResult && gravestoneDojiResult[gravestoneDojiResult.length - 1]) {
+            if (gravestoneDojiResult && gravestoneDojiResult[ gravestoneDojiResult.length - 1 ]) {
                 patterns.push("Gravestone Doji");
                 bearishSignals.push("Potential bearish reversal doji");
             }
 
             // Additional manual patterns based on price action
             if (lastCandle && secondLastCandle && thirdLastCandle) {
-                
+
                 // Three White Soldiers (manual detection)
-                if (lastCandle.close > lastCandle.open && 
-                    secondLastCandle.close > secondLastCandle.open && 
+                if (lastCandle.close > lastCandle.open &&
+                    secondLastCandle.close > secondLastCandle.open &&
                     thirdLastCandle.close > thirdLastCandle.open &&
                     lastCandle.close > secondLastCandle.close &&
                     secondLastCandle.close > thirdLastCandle.close) {
@@ -958,8 +960,8 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 }
 
                 // Three Black Crows (manual detection)
-                if (lastCandle.close < lastCandle.open && 
-                    secondLastCandle.close < secondLastCandle.open && 
+                if (lastCandle.close < lastCandle.open &&
+                    secondLastCandle.close < secondLastCandle.open &&
                     thirdLastCandle.close < thirdLastCandle.open &&
                     lastCandle.close < secondLastCandle.close &&
                     secondLastCandle.close < thirdLastCandle.close) {
@@ -993,25 +995,25 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
         // Calculate pattern strength and confidence
         const totalPatterns = patterns.length;
         const totalSignals = bullishSignals.length + bearishSignals.length;
-        
+
         const patternStrength = Math.min(1.0, totalPatterns * 0.2 + totalSignals * 0.1);
-        
+
         let patternConfidence = 0.5;
         if (totalSignals > 0) {
             const signalBalance = Math.abs(bullishSignals.length - bearishSignals.length);
             const dominantSignals = Math.max(bullishSignals.length, bearishSignals.length);
-            
+
             if (signalBalance >= 2) {
                 patternConfidence = 0.65 + (dominantSignals * 0.08);
             } else if (signalBalance >= 1) {
                 patternConfidence = 0.58 + (dominantSignals * 0.05);
             }
-            
+
             if (totalPatterns >= 3) {
                 patternConfidence += 0.1;
             }
         }
-        
+
         patternConfidence = Math.min(0.9, patternConfidence);
 
         return {
@@ -1026,13 +1028,15 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
     /**
      * Get default candlestick analysis when no OHLC data is available
      */
-    private getDefaultCandlestickAnalysis(): {
-        patterns: string[];
-        bullishSignals: string[];
-        bearishSignals: string[];
-        patternStrength: number;
-        patternConfidence: number;
-    } {
+    private getDefaultCandlestickAnalysis():
+        {
+            patterns: string[];
+            bullishSignals: string[];
+            bearishSignals: string[];
+            patternStrength: number;
+            patternConfidence: number;
+        }
+    {
         return {
             patterns: [],
             bullishSignals: [],
@@ -1045,13 +1049,15 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
     /**
      * @deprecated Use analyzeCandlestickPatternsFromOHLC instead
      */
-    private analyzeCandlestickPatterns(marketFeatures: EnhancedMarketFeatures): {
-        patterns: string[];
-        bullishSignals: string[];
-        bearishSignals: string[];
-        patternStrength: number;
-        patternConfidence: number;
-    } {
+    private analyzeCandlestickPatterns(marketFeatures: EnhancedMarketFeatures):
+        {
+            patterns: string[];
+            bullishSignals: string[];
+            bearishSignals: string[];
+            patternStrength: number;
+            patternConfidence: number;
+        }
+    {
         // Fallback to default analysis
         return this.getDefaultCandlestickAnalysis();
     }
