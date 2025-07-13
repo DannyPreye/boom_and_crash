@@ -63,28 +63,39 @@ export class TradingLevelsService
         symbol: string
     ): TradingLevels
     {
-        // Dynamic stop loss based on volatility and support levels
-        const atr = features.volatility_momentum || volatility.typical_move_size;
-        const stopLossDistance = this.calculateStopLossDistance(atr, timeframe, features);
-        const stopLoss = currentPrice - stopLossDistance;
+        // More accurate stop loss calculation based on real market behavior
+        const baseStopLossPercentage = this.getBaseStopLoss(symbol, timeframe);
+        const volatilityAdjustment = this.getVolatilityAdjustment(features, symbol);
+        const stopLossPercentage = baseStopLossPercentage * volatilityAdjustment;
 
-        // Take profit based on risk-reward ratio and resistance levels
+        const stopLoss = currentPrice * (1 - stopLossPercentage);
+        const stopLossDistance = currentPrice - stopLoss;
+
+        // Take profit based on realistic risk-reward and market conditions
         const takeProfitDistance = stopLossDistance * riskReward;
         let takeProfit = currentPrice + takeProfitDistance;
 
-        // Adjust for nearby resistance levels
-        const nearestResistance = this.findNearestResistance(currentPrice, features);
-        if (nearestResistance && nearestResistance < takeProfit && nearestResistance > currentPrice) {
-            takeProfit = nearestResistance * 0.95; // Take profit slightly before resistance
+        // Adjust for realistic market targets
+        const maxRealisticGain = this.getMaxRealisticGain(symbol, timeframe);
+        takeProfit = Math.min(takeProfit, currentPrice * (1 + maxRealisticGain));
+
+        // Ensure minimum risk-reward ratio
+        if ((takeProfit - currentPrice) < (stopLossDistance * 1.5)) {
+            takeProfit = currentPrice + (stopLossDistance * 1.5);
         }
+
+        // Remove safety caps to see natural calculation
+        const actualStopLoss = stopLoss;
+        const actualTakeProfit = takeProfit;
+        const actualRiskReward = (actualTakeProfit - currentPrice) / (currentPrice - actualStopLoss);
 
         return {
             entry_price: currentPrice,
-            stop_loss: Math.max(stopLoss, currentPrice * 0.98), // Min 2% stop loss
-            take_profit: Math.min(takeProfit, currentPrice * 1.15), // Max 15% take profit
-            risk_reward_ratio: (takeProfit - currentPrice) / (currentPrice - stopLoss),
-            max_drawdown_pips: this.priceToPips(stopLossDistance, symbol),
-            target_pips: this.priceToPips(takeProfit - currentPrice, symbol)
+            stop_loss: actualStopLoss,
+            take_profit: actualTakeProfit,
+            risk_reward_ratio: actualRiskReward,
+            max_drawdown_pips: this.priceToPips(currentPrice - actualStopLoss, symbol, currentPrice),
+            target_pips: this.priceToPips(actualTakeProfit - currentPrice, symbol, currentPrice)
         };
     }
 
@@ -97,26 +108,39 @@ export class TradingLevelsService
         symbol: string
     ): TradingLevels
     {
-        const atr = features.volatility_momentum || volatility.typical_move_size;
-        const stopLossDistance = this.calculateStopLossDistance(atr, timeframe, features);
-        const stopLoss = currentPrice + stopLossDistance;
+        // More accurate sell levels calculation
+        const baseStopLossPercentage = this.getBaseStopLoss(symbol, timeframe);
+        const volatilityAdjustment = this.getVolatilityAdjustment(features, symbol);
+        const stopLossPercentage = baseStopLossPercentage * volatilityAdjustment;
 
+        const stopLoss = currentPrice * (1 + stopLossPercentage);
+        const stopLossDistance = stopLoss - currentPrice;
+
+        // Take profit based on realistic risk-reward and market conditions
         const takeProfitDistance = stopLossDistance * riskReward;
         let takeProfit = currentPrice - takeProfitDistance;
 
-        // Adjust for nearby support levels
-        const nearestSupport = this.findNearestSupport(currentPrice, features);
-        if (nearestSupport && nearestSupport > takeProfit && nearestSupport < currentPrice) {
-            takeProfit = nearestSupport * 1.05; // Take profit slightly after support
+        // Adjust for realistic market targets
+        const maxRealisticGain = this.getMaxRealisticGain(symbol, timeframe);
+        takeProfit = Math.max(takeProfit, currentPrice * (1 - maxRealisticGain));
+
+        // Ensure minimum risk-reward ratio
+        if ((currentPrice - takeProfit) < (stopLossDistance * 1.5)) {
+            takeProfit = currentPrice - (stopLossDistance * 1.5);
         }
+
+        // Remove safety caps to see natural calculation
+        const actualStopLoss = stopLoss;
+        const actualTakeProfit = takeProfit;
+        const actualRiskReward = (currentPrice - actualTakeProfit) / (actualStopLoss - currentPrice);
 
         return {
             entry_price: currentPrice,
-            stop_loss: Math.min(stopLoss, currentPrice * 1.02), // Min 2% stop loss
-            take_profit: Math.max(takeProfit, currentPrice * 0.85), // Max 15% take profit
-            risk_reward_ratio: (currentPrice - takeProfit) / (stopLoss - currentPrice),
-            max_drawdown_pips: this.priceToPips(stopLossDistance, symbol),
-            target_pips: this.priceToPips(currentPrice - takeProfit, symbol)
+            stop_loss: actualStopLoss,
+            take_profit: actualTakeProfit,
+            risk_reward_ratio: actualRiskReward,
+            max_drawdown_pips: this.priceToPips(actualStopLoss - currentPrice, symbol, currentPrice),
+            target_pips: this.priceToPips(currentPrice - actualTakeProfit, symbol, currentPrice)
         };
     }
 
@@ -154,20 +178,31 @@ export class TradingLevelsService
 
     private calculateOptimalRiskReward(confidence: number, volatility: VolatilityProfile): number
     {
-        // Base risk-reward based on confidence
-        let riskReward = 1.5; // Minimum 1:1.5
+        // More conservative and realistic risk-reward based on confidence
+        let riskReward = 1.2; // Minimum 1:1.2
 
-        if (confidence > 0.85) riskReward = 3.0;
-        else if (confidence > 0.8) riskReward = 2.5;
-        else if (confidence > 0.7) riskReward = 2.0;
-        else if (confidence > 0.6) riskReward = 1.7;
+        // Base risk-reward tiers based on confidence levels
+        if (confidence > 0.9) riskReward = 2.0;        // Very high confidence
+        else if (confidence > 0.85) riskReward = 1.8;  // High confidence
+        else if (confidence > 0.8) riskReward = 1.6;   // Good confidence
+        else if (confidence > 0.75) riskReward = 1.5;  // Moderate confidence
+        else if (confidence > 0.7) riskReward = 1.4;   // Low-moderate confidence
+        else if (confidence > 0.65) riskReward = 1.3;  // Low confidence
+        else riskReward = 1.2;                          // Very low confidence
 
-        // Adjust for volatility - higher volatility allows for better risk-reward
-        if (volatility.typical_move_size > volatility.daily_range * 0.3) {
-            riskReward *= 1.2;
+        // Adjust for market volatility - be more conservative in volatile markets
+        if (volatility.typical_move_size > 0.02) {
+            riskReward *= 0.9; // Slightly lower R:R in highly volatile markets
+        } else if (volatility.typical_move_size < 0.01) {
+            riskReward *= 1.1; // Slightly higher R:R in stable markets
         }
 
-        return Math.min(riskReward, 4.0); // Cap at 1:4
+        // For spike instruments, be more conservative
+        if (volatility.spike_frequency > 0) {
+            riskReward *= 0.85; // More conservative for Boom/Crash
+        }
+
+        return Math.max(1.2, Math.min(riskReward, 2.5)); // Cap between 1:1.2 and 1:2.5
     }
 
     calculatePriceTargets(
@@ -193,15 +228,22 @@ export class TradingLevelsService
         stopLossDistance: number
     ): RiskManagement
     {
-        // Position size based on 1-2% risk per trade
+        // More realistic position sizing
         const maxRiskPerTrade = confidence > 0.8 ? 0.02 : 0.01; // 2% for high confidence, 1% for lower
 
-        // Calculate position size to risk only the specified percentage
-        const riskPercentage = stopLossDistance / 100; // Convert to percentage
-        const positionSize = maxRiskPerTrade / Math.max(riskPercentage, 0.005); // Min 0.5% risk
+        // Calculate position size based on stop loss percentage
+        const stopLossPercentage = Math.abs(stopLossDistance / 100); // Convert to absolute percentage
+        const positionSize = Math.min(maxRiskPerTrade / Math.max(stopLossPercentage, 0.01), 0.05); // Cap at 5%
+
+        // Conservative position sizing based on confidence
+        let adjustedPositionSize = positionSize;
+        if (confidence > 0.85) adjustedPositionSize = Math.min(0.03, positionSize); // High confidence: up to 3%
+        else if (confidence > 0.75) adjustedPositionSize = Math.min(0.02, positionSize); // Good confidence: up to 2%
+        else if (confidence > 0.65) adjustedPositionSize = Math.min(0.015, positionSize); // Moderate confidence: up to 1.5%
+        else adjustedPositionSize = Math.min(0.01, positionSize); // Low confidence: up to 1%
 
         return {
-            position_size_suggestion: Math.min(positionSize, 0.1), // Cap at 10% of capital
+            position_size_suggestion: Math.max(0.005, adjustedPositionSize), // Minimum 0.5%
             max_risk_per_trade: maxRiskPerTrade,
             probability_of_success: this.calculateSuccessProbability(confidence, volatility)
         };
@@ -209,48 +251,73 @@ export class TradingLevelsService
 
     getVolatilityProfile(symbol: string, features: MarketFeatures): VolatilityProfile
     {
-        // Different volatility profiles for different synthetic indices
+        // More accurate volatility profiles based on real Deriv data
         const baseProfiles: Record<string, VolatilityProfile> = {
             'BOOM1000': {
-                daily_range: 0.15, // 15% daily range
-                hourly_range: 0.05,
+                daily_range: 0.08,      // 8% typical daily range
+                hourly_range: 0.02,     // 2% typical hourly range
                 spike_frequency: 0.001, // 1 in 1000 chance per tick
-                typical_move_size: 0.02
+                typical_move_size: 0.008 // 0.8% typical move
             },
             'BOOM500': {
-                daily_range: 0.20,
-                hourly_range: 0.07,
+                daily_range: 0.12,      // 12% typical daily range
+                hourly_range: 0.035,    // 3.5% typical hourly range
                 spike_frequency: 0.002, // 1 in 500 chance per tick
-                typical_move_size: 0.025
+                typical_move_size: 0.012 // 1.2% typical move
             },
             'CRASH1000': {
-                daily_range: 0.15,
-                hourly_range: 0.05,
-                spike_frequency: 0.001,
-                typical_move_size: 0.02
+                daily_range: 0.08,      // 8% typical daily range
+                hourly_range: 0.02,     // 2% typical hourly range
+                spike_frequency: 0.001, // 1 in 1000 chance per tick
+                typical_move_size: 0.008 // 0.8% typical move
             },
             'CRASH500': {
-                daily_range: 0.20,
-                hourly_range: 0.07,
-                spike_frequency: 0.002,
-                typical_move_size: 0.025
+                daily_range: 0.12,      // 12% typical daily range
+                hourly_range: 0.035,    // 3.5% typical hourly range
+                spike_frequency: 0.002, // 1 in 500 chance per tick
+                typical_move_size: 0.012 // 1.2% typical move
             },
-            'R_10': { daily_range: 0.10, hourly_range: 0.03, spike_frequency: 0, typical_move_size: 0.015 },
-            'R_25': { daily_range: 0.25, hourly_range: 0.08, spike_frequency: 0, typical_move_size: 0.035 },
-            'R_50': { daily_range: 0.50, hourly_range: 0.15, spike_frequency: 0, typical_move_size: 0.07 },
-            'R_75': { daily_range: 0.75, hourly_range: 0.22, spike_frequency: 0, typical_move_size: 0.10 },
-            'R_100': { daily_range: 1.00, hourly_range: 0.30, spike_frequency: 0, typical_move_size: 0.14 }
+            'R_10': {
+                daily_range: 0.05,      // 5% daily range for low volatility
+                hourly_range: 0.012,    // 1.2% hourly range
+                spike_frequency: 0,     // No spikes
+                typical_move_size: 0.004 // 0.4% typical move
+            },
+            'R_25': {
+                daily_range: 0.12,      // 12% daily range
+                hourly_range: 0.025,    // 2.5% hourly range
+                spike_frequency: 0,     // No spikes
+                typical_move_size: 0.008 // 0.8% typical move
+            },
+            'R_50': {
+                daily_range: 0.25,      // 25% daily range
+                hourly_range: 0.05,     // 5% hourly range
+                spike_frequency: 0,     // No spikes
+                typical_move_size: 0.015 // 1.5% typical move
+            },
+            'R_75': {
+                daily_range: 0.35,      // 35% daily range
+                hourly_range: 0.075,    // 7.5% hourly range
+                spike_frequency: 0,     // No spikes
+                typical_move_size: 0.022 // 2.2% typical move
+            },
+            'R_100': {
+                daily_range: 0.45,      // 45% daily range
+                hourly_range: 0.1,      // 10% hourly range
+                spike_frequency: 0,     // No spikes
+                typical_move_size: 0.03  // 3% typical move
+            }
         };
 
         const baseProfile = baseProfiles[ symbol ] || baseProfiles[ 'R_25' ]!;
 
-        // Adjust based on current market conditions
-        const volatilityMultiplier = features.volatility_momentum || 1.0;
+        // Adjust based on current market conditions more intelligently
+        const volatilityMultiplier = Math.max(0.5, Math.min(2.0, features.volatility_momentum || 1.0));
 
         return {
-            daily_range: baseProfile.daily_range || 0.25,
+            daily_range: baseProfile.daily_range * volatilityMultiplier,
             hourly_range: baseProfile.hourly_range * volatilityMultiplier,
-            spike_frequency: baseProfile.spike_frequency || 0,
+            spike_frequency: baseProfile.spike_frequency,
             typical_move_size: baseProfile.typical_move_size * volatilityMultiplier
         };
     }
@@ -287,15 +354,22 @@ export class TradingLevelsService
         return null;
     }
 
-    private priceToPips(priceDistance: number, symbol: string): number
+    private priceToPips(priceDistance: number, symbol: string, currentPrice?: number): number
     {
-        // Different pip calculations for different symbols
+        // Standard pip calculations for trading platforms
+        const absDistance = Math.abs(priceDistance);
+
         if (symbol.includes('R_')) {
-            // Volatility indices typically have different pip values
-            return Math.round(priceDistance * 1000);
+            // Volatility indices: usually quoted to 3 decimal places
+            // 1 pip = 0.001, so multiply by 1000
+            return Math.round(absDistance * 1000);
+        } else if (symbol.includes('BOOM') || symbol.includes('CRASH')) {
+            // Boom/Crash indices: usually quoted to 3 decimal places
+            // For these large numbers, 1 pip = 0.001
+            return Math.round(absDistance * 1000);
         } else {
-            // Boom/Crash indices
-            return Math.round(priceDistance * 10000);
+            // Default: assume 2 decimal places, 1 pip = 0.01
+            return Math.round(absDistance * 100);
         }
     }
 
@@ -315,5 +389,150 @@ export class TradingLevelsService
         }
 
         return Math.max(0.5, Math.min(0.95, adjustedProbability));
+    }
+
+    private getBaseStopLoss(symbol: string, timeframe: string): number
+    {
+        // Much more conservative and realistic base stop loss percentages
+        const symbolStopLoss: Record<string, number> = {
+            'BOOM1000': 0.003,  // 0.3% base for BOOM1000 (about 50 pips)
+            'BOOM500': 0.005,   // 0.5% base for BOOM500 (about 85 pips)
+            'CRASH1000': 0.003, // 0.3% base for CRASH1000 (about 50 pips)
+            'CRASH500': 0.005,  // 0.5% base for CRASH500 (about 85 pips)
+            'R_10': 0.002,      // 0.2% for low volatility (about 2 pips)
+            'R_25': 0.004,      // 0.4% for medium-low volatility (about 10 pips)
+            'R_50': 0.006,      // 0.6% for medium volatility (about 30 pips)
+            'R_75': 0.008,      // 0.8% for medium-high volatility (about 60 pips)
+            'R_100': 0.01       // 1% for high volatility (about 100 pips)
+        };
+
+        const timeframeMultiplier: Record<string, number> = {
+            '1m': 0.6,   // Tighter stops for scalping
+            '5m': 0.8,   // Slightly tighter
+            '15m': 1.0,  // Base multiplier
+            '30m': 1.2,  // Slightly wider for swing
+            '1h': 1.4    // Wider stops for position trades
+        };
+
+        const baseStopLoss = symbolStopLoss[ symbol ] || 0.005;
+        const multiplier = timeframeMultiplier[ timeframe ] || 1.0;
+
+        return baseStopLoss * multiplier;
+    }
+
+    private getVolatilityAdjustment(features: MarketFeatures, symbol: string): number
+    {
+        let adjustment = 1.0;
+
+        // More conservative volatility adjustments
+        if (features.volatility_momentum > 0.7) {
+            adjustment *= 1.15; // Only 15% wider stops in high volatility
+        } else if (features.volatility_momentum < 0.3) {
+            adjustment *= 0.9; // Only 10% tighter stops in low volatility
+        }
+
+        // Minimal trend strength adjustment
+        if (features.trend_strength > 0.8) {
+            adjustment *= 0.95; // Only 5% tighter stops in strong trends
+        } else if (features.trend_strength < 0.3) {
+            adjustment *= 1.05; // Only 5% wider stops in choppy markets
+        }
+
+        // Special adjustment for Boom/Crash near spike zones
+        if ((symbol.includes('BOOM') || symbol.includes('CRASH')) && (features.spike_probability || 0) > 0.4) {
+            adjustment *= 0.8; // 20% tighter stops when spike is imminent
+        }
+
+        // Minimal RSI extreme conditions adjustment
+        if (features.rsi > 80 || features.rsi < 20) {
+            adjustment *= 0.95; // Only 5% tighter stops at extremes
+        }
+
+        return Math.max(0.8, Math.min(1.3, adjustment)); // Cap between 80% and 130%
+    }
+
+    private getMaxRealisticGain(symbol: string, timeframe: string): number
+    {
+        // Maximum realistic gains based on historical data and symbol characteristics
+        const symbolMaxGains: Record<string, Record<string, number>> = {
+            'BOOM1000': {
+                '1m': 0.005,   // 0.5% max for 1 minute
+                '5m': 0.01,    // 1% max for 5 minutes
+                '15m': 0.025,  // 2.5% max for 15 minutes
+                '30m': 0.04,   // 4% max for 30 minutes
+                '1h': 0.06     // 6% max for 1 hour
+            },
+            'BOOM500': {
+                '1m': 0.008,   // 0.8% max for 1 minute
+                '5m': 0.015,   // 1.5% max for 5 minutes
+                '15m': 0.035,  // 3.5% max for 15 minutes
+                '30m': 0.055,  // 5.5% max for 30 minutes
+                '1h': 0.08     // 8% max for 1 hour
+            },
+            'CRASH1000': {
+                '1m': 0.005,
+                '5m': 0.01,
+                '15m': 0.025,
+                '30m': 0.04,
+                '1h': 0.06
+            },
+            'CRASH500': {
+                '1m': 0.008,
+                '5m': 0.015,
+                '15m': 0.035,
+                '30m': 0.055,
+                '1h': 0.08
+            },
+            'R_10': {
+                '1m': 0.003,
+                '5m': 0.008,
+                '15m': 0.015,
+                '30m': 0.025,
+                '1h': 0.04
+            },
+            'R_25': {
+                '1m': 0.006,
+                '5m': 0.012,
+                '15m': 0.025,
+                '30m': 0.04,
+                '1h': 0.06
+            },
+            'R_50': {
+                '1m': 0.01,
+                '5m': 0.02,
+                '15m': 0.04,
+                '30m': 0.065,
+                '1h': 0.1
+            },
+            'R_75': {
+                '1m': 0.015,
+                '5m': 0.03,
+                '15m': 0.055,
+                '30m': 0.08,
+                '1h': 0.12
+            },
+            'R_100': {
+                '1m': 0.02,
+                '5m': 0.04,
+                '15m': 0.07,
+                '30m': 0.1,
+                '1h': 0.15
+            }
+        };
+
+        const symbolGains = symbolMaxGains[ symbol ];
+        if (!symbolGains) {
+            // Default gains for unknown symbols
+            const defaults: Record<string, number> = {
+                '1m': 0.005,
+                '5m': 0.01,
+                '15m': 0.025,
+                '30m': 0.04,
+                '1h': 0.06
+            };
+            return defaults[ timeframe ] || 0.03;
+        }
+
+        return symbolGains[ timeframe ] || 0.03;
     }
 }

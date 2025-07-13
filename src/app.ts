@@ -7,6 +7,7 @@ import { DerivWebSocketClient } from './services/deriv-client';
 import { FeatureEngineeringService, MarketFeatures } from './services/feature-engineering';
 import { GeminiAIService, GeminiPrediction } from './services/gemini-ai';
 import { TradingLevelsService, TradingLevels, PriceTargets, RiskManagement } from './services/trading-levels.service';
+import { AutonomousTradingAgent } from './agents/autonomous-trading-agent';
 
 // Load environment variables
 dotenv.config();
@@ -65,6 +66,7 @@ let derivClient: DerivWebSocketClient | null = null;
 let featureService: FeatureEngineeringService | null = null;
 let geminiService: GeminiAIService | null = null;
 let tradingLevelsService: TradingLevelsService | null = null;
+let autonomousAgent: AutonomousTradingAgent | null = null;
 let isInitialized = false;
 
 async function initializeServices()
@@ -83,10 +85,29 @@ async function initializeServices()
         tradingLevelsService = new TradingLevelsService();
 
         const geminiApiKey = process.env.GEMINI_API_KEY;
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
         if (!geminiApiKey) {
             console.warn('GEMINI_API_KEY not found in environment, AI predictions will be limited' + geminiApiKey);
         }
         geminiService = new GeminiAIService(geminiApiKey || 'demo-key');
+
+        // Initialize autonomous trading agent
+        // autonomousAgent = new AutonomousTradingAgent(geminiApiKey || 'demo-key');
+        autonomousAgent = new AutonomousTradingAgent(anthropicApiKey || 'demo-key');
+
+        // Test LLM connection on startup
+        console.log('Testing autonomous agent LLM connection...');
+        autonomousAgent.testConnection().then(success =>
+        {
+            if (success) {
+                console.log('✅ Autonomous agent LLM connection successful');
+            } else {
+                console.warn('⚠️ Autonomous agent LLM connection failed - will use fallback predictions');
+            }
+        }).catch(error =>
+        {
+            console.error('❌ Autonomous agent LLM test error:', error);
+        });
 
         // Add error handler to prevent crashes
         derivClient.on('error', (error) =>
@@ -365,6 +386,86 @@ app.post('/api/predict', async (req, res) =>
     }
 });
 
+app.post('/api/predict/autonomous', async (req, res) =>
+{
+    try {
+        // Validate request
+        const validatedData = predictionRequestSchema.parse(req.body);
+
+        if (!autonomousAgent) {
+            return res.status(503).json({
+                error: 'Autonomous agent not available',
+                message: 'AI service is not initialized',
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        // Get current price and market features using the same approach as existing function
+        const requestId = Math.random().toString(36).substring(7);
+
+        if (!isInitialized || !derivClient?.getConnectionStatus()) {
+            throw new Error('Market data not available - system not initialized');
+        }
+
+        // Get real market data and features (same as existing generatePrediction)
+        const marketData = await derivClient.getLatestTicks(validatedData.symbol, 100);
+        const features = featureService!.calculateFeatures(marketData, validatedData.symbol);
+        const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
+
+        // Generate autonomous prediction with additional error handling
+        console.log(`Starting autonomous prediction for ${validatedData.symbol}/${validatedData.timeframe}...`);
+
+        let prediction;
+        try {
+            prediction = await autonomousAgent.generateCompletePrediction(
+                validatedData.symbol,
+                validatedData.timeframe,
+                currentPrice,
+                features
+            );
+        } catch (llmError) {
+            console.error('LLM prediction failed:', llmError);
+
+            // Return a more informative fallback response
+            return res.status(503).json({
+                error: 'AI prediction service temporarily unavailable',
+                message: 'The AI model is currently experiencing issues. Please try again in a few moments.',
+                details: llmError instanceof Error ? llmError.message : 'Unknown LLM error',
+                fallback_available: true,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        // Enhanced response with request tracking
+        const response = {
+            ...prediction,
+            timestamp: new Date().toISOString(),
+            model_version: '3.0.0-autonomous',
+            request_id: requestId,
+            ai_reasoning: prediction.reasoning,
+        };
+
+        console.log(`${new Date().toISOString()} - POST /api/predict/autonomous - ${validatedData.symbol}/${validatedData.timeframe} - ${prediction.prediction} (${Math.round(prediction.confidence * 100)}%)`);
+
+        return res.json(response);
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({
+                error: 'Validation error',
+                details: error.errors,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        console.error('Autonomous prediction error:', error);
+        return res.status(500).json({
+            error: 'Autonomous prediction failed',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+        });
+    }
+});
+
 app.get('/api/predict/supported-symbols', (req, res) =>
 {
     const symbols = [
@@ -403,6 +504,17 @@ app.get('/api/docs', (req, res) =>
                     symbol: 'BOOM1000',
                     timeframe: '5m',
                     includeAnalysis: true,
+                },
+            },
+            'POST /api/predict/autonomous': {
+                description: 'Generate autonomous AI-driven prediction for a symbol',
+                body: {
+                    symbol: 'SyntheticSymbol (required) - BOOM1000, BOOM500, CRASH1000, CRASH500, R_10, R_25, R_50, R_75, R_100',
+                    timeframe: 'Timeframe (required) - 1m, 5m, 15m, 30m, 1h',
+                },
+                example: {
+                    symbol: 'BOOM1000',
+                    timeframe: '5m',
                 },
             },
             'GET /api/predict/supported-symbols': {
