@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { DerivWebSocketClient } from './services/deriv-client';
 import { FeatureEngineeringService, MarketFeatures } from './services/feature-engineering';
 import { GeminiAIService, GeminiPrediction } from './services/gemini-ai';
+import { TradingLevelsService, TradingLevels, PriceTargets, RiskManagement } from './services/trading-levels.service';
 
 // Load environment variables
 dotenv.config();
@@ -38,6 +39,9 @@ interface PredictionResponse
         spike_proximity?: number;
         volatility_momentum?: number;
     };
+    trading_levels: TradingLevels;
+    price_targets: PriceTargets;
+    risk_management: RiskManagement;
     analysis?: string;
     timestamp: string;
     model_version: string;
@@ -57,9 +61,10 @@ const predictionRequestSchema = z.object({
 const app = express();
 
 // Initialize services
-let derivClient: DerivWebSocketClient;
-let featureService: FeatureEngineeringService;
-let geminiService: GeminiAIService;
+let derivClient: DerivWebSocketClient | null = null;
+let featureService: FeatureEngineeringService | null = null;
+let geminiService: GeminiAIService | null = null;
+let tradingLevelsService: TradingLevelsService | null = null;
 let isInitialized = false;
 
 async function initializeServices()
@@ -75,6 +80,7 @@ async function initializeServices()
         // Initialize services
         derivClient = new DerivWebSocketClient(derivApiUrl, derivApiToken, derivAppId);
         featureService = new FeatureEngineeringService();
+        tradingLevelsService = new TradingLevelsService();
 
         const geminiApiKey = process.env.GEMINI_API_KEY;
         if (!geminiApiKey) {
@@ -158,13 +164,39 @@ async function generatePrediction(symbol: string, timeframe: string, includeAnal
     try {
         // Get real market data and features
         const marketData = await derivClient.getLatestTicks(symbol, 100);
-        const features = featureService.calculateFeatures(marketData, symbol);
+        const features = featureService!.calculateFeatures(marketData, symbol);
+        const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
 
         // Get AI prediction
-        const aiPrediction = await geminiService.generatePrediction(symbol, timeframe, features);
+        const aiPrediction = await geminiService!.generatePrediction(symbol, timeframe, features);
 
         // Combine technical and AI analysis
         const combinedConfidence = calculateCombinedConfidence(features, aiPrediction);
+
+        // Calculate trading levels
+        const tradingLevels = tradingLevelsService!.calculateTradingLevels(
+            currentPrice,
+            aiPrediction.direction,
+            features,
+            symbol,
+            timeframe,
+            combinedConfidence
+        );
+
+        // Calculate price targets
+        const priceTargets = tradingLevelsService!.calculatePriceTargets(
+            currentPrice,
+            aiPrediction.direction,
+            features,
+            symbol
+        );
+
+        // Calculate risk management
+        const riskManagement = tradingLevelsService!.calculateRiskManagement(
+            combinedConfidence,
+            tradingLevelsService!.getVolatilityProfile(symbol, features),
+            Math.abs(tradingLevels.stop_loss - currentPrice)
+        );
 
         return {
             symbol,
@@ -180,7 +212,10 @@ async function generatePrediction(symbol: string, timeframe: string, includeAnal
                     : { volatility_momentum: features.volatility_momentum }
                 ),
             },
-            analysis: includeAnalysis ? generateDetailedAnalysis(features, aiPrediction, symbol) : undefined,
+            trading_levels: tradingLevels,
+            price_targets: priceTargets,
+            risk_management: riskManagement,
+            analysis: includeAnalysis ? generateDetailedAnalysis(features, aiPrediction, symbol, tradingLevels) : undefined,
             timestamp: new Date().toISOString(),
             model_version: '2.0.0',
             request_id,
@@ -207,7 +242,7 @@ function calculateCombinedConfidence(features: MarketFeatures, aiPrediction: Gem
     return Math.max(0.5, Math.min(0.95, combined));
 }
 
-function generateDetailedAnalysis(features: MarketFeatures, aiPrediction: GeminiPrediction, symbol: string): string
+function generateDetailedAnalysis(features: MarketFeatures, aiPrediction: GeminiPrediction, symbol: string, tradingLevels: TradingLevels): string
 {
     return `
 DETAILED ANALYSIS for ${symbol}:
@@ -218,6 +253,12 @@ Technical Indicators:
 - Trend Strength: ${(features.trend_strength * 100).toFixed(1)}%
 - Volatility Momentum: ${(features.volatility_momentum * 100).toFixed(1)}%
 - Price Velocity: ${features.price_velocity.toFixed(6)}
+
+Trading Levels:
+- Entry Price: ${tradingLevels.entry_price.toFixed(4)}
+- Stop Loss: ${tradingLevels.stop_loss.toFixed(4)} (${tradingLevels.max_drawdown_pips} pips)
+- Take Profit: ${tradingLevels.take_profit.toFixed(4)} (${tradingLevels.target_pips} pips)
+- Risk/Reward Ratio: 1:${tradingLevels.risk_reward_ratio.toFixed(2)}
 
 ${symbol.includes('BOOM') || symbol.includes('CRASH') ?
             `Spike Analysis:
@@ -233,11 +274,40 @@ Market Sentiment: ${aiPrediction.sentiment_score > 0 ? 'Bullish' : 'Bearish'} ($
 
 function generateMockPrediction(symbol: string, timeframe: string, includeAnalysis: boolean, request_id: string): PredictionResponse
 {
+    const prediction: 'UP' | 'DOWN' = Math.random() > 0.5 ? 'UP' : 'DOWN';
+    const confidence = 0.75 + Math.random() * 0.2; // 0.75-0.95
+    const currentPrice = 100 + Math.random() * 200; // Mock current price
+
+    // Mock trading levels
+    const stopLossDistance = currentPrice * 0.02; // 2% stop loss
+    const takeProfitDistance = stopLossDistance * 2; // 1:2 risk reward
+
+    const tradingLevels: TradingLevels = {
+        entry_price: currentPrice,
+        stop_loss: prediction === 'UP' ? currentPrice - stopLossDistance : currentPrice + stopLossDistance,
+        take_profit: prediction === 'UP' ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance,
+        risk_reward_ratio: 2.0,
+        max_drawdown_pips: Math.round(stopLossDistance * 10000),
+        target_pips: Math.round(takeProfitDistance * 10000)
+    };
+
+    const priceTargets: PriceTargets = {
+        immediate: currentPrice + (prediction === 'UP' ? 1 : -1) * currentPrice * 0.005,
+        short_term: currentPrice + (prediction === 'UP' ? 1 : -1) * currentPrice * 0.015,
+        medium_term: currentPrice + (prediction === 'UP' ? 1 : -1) * currentPrice * 0.04
+    };
+
+    const riskManagement: RiskManagement = {
+        position_size_suggestion: confidence > 0.8 ? 0.02 : 0.01,
+        max_risk_per_trade: 0.02,
+        probability_of_success: confidence
+    };
+
     return {
         symbol,
         timeframe,
-        prediction: Math.random() > 0.5 ? 'UP' : 'DOWN',
-        confidence: 0.75 + Math.random() * 0.2, // 0.75-0.95
+        prediction,
+        confidence,
         factors: {
             technical: 0.8 + Math.random() * 0.2,
             sentiment: (Math.random() - 0.5) * 2, // -1 to 1
@@ -247,8 +317,15 @@ function generateMockPrediction(symbol: string, timeframe: string, includeAnalys
                 : { volatility_momentum: 0.7 + Math.random() * 0.3 }
             ),
         },
+        trading_levels: tradingLevels,
+        price_targets: priceTargets,
+        risk_management: riskManagement,
         analysis: includeAnalysis
-            ? `MOCK ANALYSIS for ${symbol} on ${timeframe}: This is a mock prediction using simulated data. Connect to real services for actual market analysis.`
+            ? `ENHANCED MOCK ANALYSIS for ${symbol} on ${timeframe}:
+${prediction} signal with ${Math.round(confidence * 100)}% confidence.
+Entry: ${currentPrice.toFixed(4)}, SL: ${tradingLevels.stop_loss.toFixed(4)}, TP: ${tradingLevels.take_profit.toFixed(4)}
+Risk/Reward: 1:${tradingLevels.risk_reward_ratio.toFixed(2)}
+Position Size: ${(riskManagement.position_size_suggestion * 100).toFixed(1)}% of capital`
             : undefined,
         timestamp: new Date().toISOString(),
         model_version: '2.0.0-mock',
