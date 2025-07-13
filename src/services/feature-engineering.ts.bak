@@ -1,0 +1,285 @@
+import { DerivTickData, DerivCandleData } from './deriv-client';
+
+export interface MarketFeatures {
+  price_velocity: number;
+  price_acceleration: number;
+  volatility_momentum: number;
+  trend_strength: number;
+  support_resistance_proximity: number;
+  rsi: number;
+  macd_signal: number;
+  bollinger_position: number;
+  ticks_since_last_spike?: number;
+  spike_probability?: number;
+}
+
+export class FeatureEngineeringService {
+  private tickBuffers: Map<string, DerivTickData[]> = new Map();
+  private candleBuffers: Map<string, DerivCandleData[]> = new Map();
+  private spikeTracking: Map<string, { lastSpikeIndex: number; tickCount: number }> = new Map();
+  private readonly MAX_BUFFER_SIZE = 1000;
+
+  addTick(tick: DerivTickData): void {
+    const buffer = this.tickBuffers.get(tick.symbol) || [];
+    buffer.push(tick);
+    
+    // Maintain buffer size
+    if (buffer.length > this.MAX_BUFFER_SIZE) {
+      buffer.shift();
+    }
+    
+    this.tickBuffers.set(tick.symbol, buffer);
+    this.detectSpike(tick);
+  }
+
+  addCandle(candle: DerivCandleData): void {
+    const buffer = this.candleBuffers.get(candle.symbol) || [];
+    buffer.push(candle);
+    
+    // Maintain buffer size
+    if (buffer.length > this.MAX_BUFFER_SIZE) {
+      buffer.shift();
+    }
+    
+    this.candleBuffers.set(candle.symbol, buffer);
+  }
+
+  extractFeatures(symbol: string): MarketFeatures | null {
+    const candles = this.candleBuffers.get(symbol);
+    const ticks = this.tickBuffers.get(symbol);
+    
+    if (!candles || candles.length < 20) {
+      return null;
+    }
+
+    const features: MarketFeatures = {
+      price_velocity: this.calculatePriceVelocity(candles),
+      price_acceleration: this.calculatePriceAcceleration(candles),
+      volatility_momentum: this.calculateVolatilityMomentum(candles),
+      trend_strength: this.calculateTrendStrength(candles),
+      support_resistance_proximity: this.calculateSupportResistanceProximity(candles),
+      rsi: this.calculateRSI(candles),
+      macd_signal: this.calculateMACDSignal(candles),
+      bollinger_position: this.calculateBollingerPosition(candles),
+    };
+
+    // Add Boom/Crash specific features
+    if (symbol.includes('BOOM') || symbol.includes('CRASH')) {
+      const spikeData = this.spikeTracking.get(symbol);
+      if (spikeData) {
+        features.ticks_since_last_spike = spikeData.tickCount - spikeData.lastSpikeIndex;
+        features.spike_probability = this.calculateSpikeProbability(symbol, features.ticks_since_last_spike);
+      }
+    }
+
+    return features;
+  }
+
+  calculateFeatures(tickData: DerivTickData[], symbol: string): MarketFeatures {
+    // Add ticks to buffer for processing
+    for (const tick of tickData) {
+      this.addTick(tick);
+    }
+    
+    // Extract features from the symbol
+    const features = this.extractFeatures(symbol);
+    if (!features) {
+      // Return default features if extraction fails
+      return {
+        price_velocity: 0,
+        price_acceleration: 0,
+        volatility_momentum: 0.5,
+        trend_strength: 0.5,
+        support_resistance_proximity: 0.5,
+        rsi: 50,
+        macd_signal: 0,
+        bollinger_position: 0.5,
+        ticks_since_last_spike: undefined,
+        spike_probability: undefined,
+      };
+    }
+    
+    return features;
+  }
+
+  private calculatePriceVelocity(candles: DerivCandleData[]): number {
+    if (candles.length < 2) return 0;
+    
+    const recent = candles.slice(-10);
+    let totalChange = 0;
+    let validChanges = 0;
+    
+    for (let i = 1; i < recent.length; i++) {
+      const currentCandle = recent[i];
+      const previousCandle = recent[i-1];
+      if (currentCandle && previousCandle && previousCandle.close > 0) {
+        const change = (currentCandle.close - previousCandle.close) / previousCandle.close;
+        totalChange += change;
+        validChanges++;
+      }
+    }
+    
+    return validChanges > 0 ? totalChange / validChanges : 0;
+  }
+
+  private calculatePriceAcceleration(candles: DerivCandleData[]): number {
+    if (candles.length < 3) return 0;
+    
+    const recent = candles.slice(-5);
+    const velocities: number[] = [];
+    
+    for (let i = 1; i < recent.length; i++) {
+      const velocity = (recent[i].close - recent[i-1].close) / recent[i-1].close;
+      velocities.push(velocity);
+    }
+    
+    if (velocities.length < 2) return 0;
+    
+    let totalAcceleration = 0;
+    for (let i = 1; i < velocities.length; i++) {
+      totalAcceleration += velocities[i] - velocities[i-1];
+    }
+    
+    return totalAcceleration / (velocities.length - 1);
+  }
+
+  private calculateVolatilityMomentum(candles: DerivCandleData[]): number {
+    if (candles.length < 10) return 0;
+    
+    const recent = candles.slice(-20);
+    const volatilities = recent.map(candle => 
+      Math.abs(candle.high - candle.low) / candle.close
+    );
+    
+    const recentVol = volatilities.slice(-5).reduce((sum, vol) => sum + vol, 0) / 5;
+    const historicalVol = volatilities.slice(0, -5).reduce((sum, vol) => sum + vol, 0) / (volatilities.length - 5);
+    
+    return historicalVol > 0 ? (recentVol - historicalVol) / historicalVol : 0;
+  }
+
+  private calculateTrendStrength(candles: DerivCandleData[]): number {
+    if (candles.length < 14) return 0;
+    
+    const recent = candles.slice(-14);
+    let upMoves = 0;
+    let downMoves = 0;
+    
+    for (let i = 1; i < recent.length; i++) {
+      const move = recent[i].close - recent[i-1].close;
+      if (move > 0) upMoves += move;
+      else downMoves += Math.abs(move);
+    }
+    
+    const totalMoves = upMoves + downMoves;
+    return totalMoves > 0 ? Math.abs(upMoves - downMoves) / totalMoves : 0;
+  }
+
+  private calculateSupportResistanceProximity(candles: DerivCandleData[]): number {
+    if (candles.length < 50) return 0.5;
+    
+    const recent = candles.slice(-50);
+    const currentPrice = recent[recent.length - 1].close;
+    
+    const highs = recent.map(c => c.high).sort((a, b) => b - a);
+    const lows = recent.map(c => c.low).sort((a, b) => a - b);
+    
+    const resistance = highs[Math.floor(highs.length * 0.1)];
+    const support = lows[Math.floor(lows.length * 0.1)];
+    
+    const range = resistance - support;
+    return range > 0 ? (currentPrice - support) / range : 0.5;
+  }
+
+  private calculateRSI(candles: DerivCandleData[], period: number = 14): number {
+    if (candles.length < period + 1) return 50;
+    
+    const recent = candles.slice(-(period + 1));
+    let gains = 0;
+    let losses = 0;
+    
+    for (let i = 1; i < recent.length; i++) {
+      const change = recent[i].close - recent[i-1].close;
+      if (change > 0) gains += change;
+      else losses += Math.abs(change);
+    }
+    
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
+  private calculateMACDSignal(candles: DerivCandleData[]): number {
+    if (candles.length < 26) return 0;
+    
+    const ema12 = this.calculateEMA(candles, 12);
+    const ema26 = this.calculateEMA(candles, 26);
+    return ema12 - ema26;
+  }
+
+  private calculateBollingerPosition(candles: DerivCandleData[], period: number = 20): number {
+    if (candles.length < period) return 0.5;
+    
+    const recent = candles.slice(-period);
+    const sma = recent.reduce((sum, c) => sum + c.close, 0) / period;
+    
+    const variance = recent.reduce((sum, c) => sum + Math.pow(c.close - sma, 2), 0) / period;
+    const stdDev = Math.sqrt(variance);
+    
+    const currentPrice = recent[recent.length - 1].close;
+    const upperBand = sma + (2 * stdDev);
+    const lowerBand = sma - (2 * stdDev);
+    
+    const bandWidth = upperBand - lowerBand;
+    return bandWidth > 0 ? (currentPrice - lowerBand) / bandWidth : 0.5;
+  }
+
+  private calculateEMA(candles: DerivCandleData[], period: number): number {
+    if (candles.length === 0) return 0;
+    
+    const recent = candles.slice(-Math.min(period * 2, candles.length));
+    const multiplier = 2 / (period + 1);
+    
+    let ema = recent[0].close;
+    for (let i = 1; i < recent.length; i++) {
+      ema = (recent[i].close * multiplier) + (ema * (1 - multiplier));
+    }
+    
+    return ema;
+  }
+
+  private detectSpike(tick: DerivTickData): void {
+    const buffer = this.tickBuffers.get(tick.symbol) || [];
+    if (buffer.length < 2) return;
+    
+    const previousTick = buffer[buffer.length - 2];
+    const priceChange = (tick.tick - previousTick.tick) / previousTick.tick;
+    
+    // Define spike thresholds
+    const isBoomSpike = tick.symbol.includes('BOOM') && priceChange > 0.05; // 5% upward
+    const isCrashSpike = tick.symbol.includes('CRASH') && priceChange < -0.05; // 5% downward
+    
+    if (isBoomSpike || isCrashSpike) {
+      const tracking = this.spikeTracking.get(tick.symbol) || { lastSpikeIndex: 0, tickCount: 0 };
+      tracking.lastSpikeIndex = buffer.length;
+      this.spikeTracking.set(tick.symbol, tracking);
+      
+      console.log(`Spike detected in ${tick.symbol}: ${priceChange.toFixed(4)} at tick ${buffer.length}`);
+    }
+    
+    // Update tick count
+    const tracking = this.spikeTracking.get(tick.symbol) || { lastSpikeIndex: 0, tickCount: 0 };
+    tracking.tickCount = buffer.length;
+    this.spikeTracking.set(tick.symbol, tracking);
+  }
+
+  private calculateSpikeProbability(symbol: string, ticksSinceLastSpike: number): number {
+    const expectedFrequency = symbol.includes('1000') ? 1000 : 500;
+    const probability = Math.min(ticksSinceLastSpike / expectedFrequency, 1.0);
+    
+    // Apply a sigmoid function for more realistic probability curve
+    return 1 / (1 + Math.exp(-6 * (probability - 0.5)));
+  }
+}
