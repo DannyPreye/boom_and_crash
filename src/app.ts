@@ -4,10 +4,11 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 import { DerivWebSocketClient } from './services/deriv-client';
-import { FeatureEngineeringService, MarketFeatures } from './services/feature-engineering';
+import { EnhancedFeatureEngineeringService } from './services/enhanced-feature-engineering.service';
+import { EnhancedMarketFeatures } from './types/enhanced-features.types';
 import { GeminiAIService, GeminiPrediction } from './services/gemini-ai';
 import { TradingLevelsService, TradingLevels, PriceTargets, RiskManagement } from './services/trading-levels.service';
-import { AutonomousTradingAgent } from './agents/autonomous-trading-agent';
+import { AutonomousTradingAgent } from './agents/enhanced-autonomous-trading-agent-fixed';
 
 // Load environment variables
 dotenv.config();
@@ -47,7 +48,7 @@ interface PredictionResponse
     timestamp: string;
     model_version: string;
     request_id: string;
-    features?: MarketFeatures;
+    features?: EnhancedMarketFeatures;
     ai_reasoning?: string;
 }
 
@@ -63,7 +64,7 @@ const app = express();
 
 // Initialize services
 let derivClient: DerivWebSocketClient | null = null;
-let featureService: FeatureEngineeringService | null = null;
+let featureService: EnhancedFeatureEngineeringService | null = null;
 let geminiService: GeminiAIService | null = null;
 let tradingLevelsService: TradingLevelsService | null = null;
 let autonomousAgent: AutonomousTradingAgent | null = null;
@@ -81,7 +82,7 @@ async function initializeServices()
 
         // Initialize services
         derivClient = new DerivWebSocketClient(derivApiUrl, derivApiToken, derivAppId);
-        featureService = new FeatureEngineeringService();
+        featureService = new EnhancedFeatureEngineeringService();
         tradingLevelsService = new TradingLevelsService();
 
         const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -183,9 +184,14 @@ async function generatePrediction(symbol: string, timeframe: string, includeAnal
     }
 
     try {
-        // Get real market data and features
+        // Get real market data and feed to enhanced feature service
         const marketData = await derivClient.getLatestTicks(symbol, 100);
-        const features = featureService!.calculateFeatures(marketData, symbol);
+
+        // Feed market data to enhanced feature service
+        marketData.forEach(tick => featureService!.addTick(tick));
+
+        // Generate enhanced features
+        const features = featureService!.generateEnhancedFeatures(symbol);
         const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
 
         // Get AI prediction
@@ -250,7 +256,7 @@ async function generatePrediction(symbol: string, timeframe: string, includeAnal
     }
 }
 
-function calculateCombinedConfidence(features: MarketFeatures, aiPrediction: GeminiPrediction): number
+function calculateCombinedConfidence(features: EnhancedMarketFeatures, aiPrediction: GeminiPrediction): number
 {
     // Combine technical and AI confidence
     const technicalConfidence = Math.abs(features.trend_strength);
@@ -263,7 +269,7 @@ function calculateCombinedConfidence(features: MarketFeatures, aiPrediction: Gem
     return Math.max(0.5, Math.min(0.95, combined));
 }
 
-function generateDetailedAnalysis(features: MarketFeatures, aiPrediction: GeminiPrediction, symbol: string, tradingLevels: TradingLevels): string
+function generateDetailedAnalysis(features: EnhancedMarketFeatures, aiPrediction: GeminiPrediction, symbol: string, tradingLevels: TradingLevels): string
 {
     return `
 DETAILED ANALYSIS for ${symbol}:
@@ -407,9 +413,17 @@ app.post('/api/predict/autonomous', async (req, res) =>
             throw new Error('Market data not available - system not initialized');
         }
 
-        // Get real market data and features (same as existing generatePrediction)
+        // Get real market data and feed to enhanced feature service
         const marketData = await derivClient.getLatestTicks(validatedData.symbol, 100);
-        const features = featureService!.calculateFeatures(marketData, validatedData.symbol);
+
+        // Feed market data to enhanced feature service
+        marketData.forEach(tick => featureService!.addTick(tick));
+
+        // Generate candle data for candlestick pattern analysis
+        const candleData = featureService!.generateCandlesFromTicks(marketData, 60); // 1-minute candles
+
+        // Generate enhanced features
+        const features = featureService!.generateEnhancedFeatures(validatedData.symbol);
         const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
 
         // Generate autonomous prediction with additional error handling
@@ -421,7 +435,8 @@ app.post('/api/predict/autonomous', async (req, res) =>
                 validatedData.symbol,
                 validatedData.timeframe,
                 currentPrice,
-                features
+                features,
+                candleData // Pass candle data for real candlestick analysis
             );
         } catch (llmError) {
             console.error('LLM prediction failed:', llmError);
