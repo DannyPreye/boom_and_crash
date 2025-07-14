@@ -186,7 +186,7 @@ Analyze the data including candlestick patterns and provide your trading decisio
 {
   "prediction": "UP" or "DOWN",
   "confidence": 0.65,
-  "reasoning": "Brief analysis covering technical indicators, candlestick patterns, trend alignment, and key factors",
+  "reasoning": "Clear explanation of why you chose UP/DOWN, highlighting the strongest supporting factors and addressing any conflicting signals",
   "entry_price": ${currentPrice},
   "stop_loss": calculate based on symbol volatility,
   "take_profit": calculate based on 1.5-3x risk reward,
@@ -662,6 +662,37 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
             Math.abs(result.trading_levels.take_profit - result.trading_levels.entry_price),
             result.symbol
         );
+
+        // Validate reasoning alignment with prediction
+        this.validateReasoningAlignment(result);
+    }
+
+    /**
+     * Validates that the reasoning aligns with the prediction direction
+     */
+    private validateReasoningAlignment(result: AutonomousPredictionResult): void
+    {
+        if (!result.reasoning || !result.prediction) {
+            return;
+        }
+
+        const reasoning = result.reasoning.toLowerCase();
+        const prediction = result.prediction.toUpperCase();
+
+        // Check for contradictions
+        const hasBullishTerms = reasoning.includes('bull') || reasoning.includes('up') || reasoning.includes('long') || reasoning.includes('buy');
+        const hasBearishTerms = reasoning.includes('bear') || reasoning.includes('down') || reasoning.includes('short') || reasoning.includes('sell');
+
+        if (prediction === 'UP' && hasBearishTerms && !hasBullishTerms) {
+            console.warn('⚠️ Warning: UP prediction but reasoning contains bearish terms without bullish justification');
+        } else if (prediction === 'DOWN' && hasBullishTerms && !hasBearishTerms) {
+            console.warn('⚠️ Warning: DOWN prediction but reasoning contains bullish terms without bearish justification');
+        }
+
+        // Ensure reasoning mentions the prediction direction
+        if (!reasoning.includes(prediction.toLowerCase())) {
+            console.warn(`⚠️ Warning: Reasoning does not clearly mention the prediction direction (${prediction})`);
+        }
     }
 
     private calculatePips(priceDistance: number, symbol: string): number
@@ -716,7 +747,7 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
                 probability_of_success: confidence,
             },
             analysis: `Fallback analysis for ${symbol}: Market trend suggests ${prediction} direction with moderate confidence.`,
-            reasoning: `Basic trend-following approach due to AI analysis failure. Trend strength: ${marketFeatures.trend_strength}`,
+            reasoning: `Fallback analysis: Prediction is ${prediction} based on trend strength (${marketFeatures.trend_strength.toFixed(3)}). AI analysis unavailable.`,
             factors: {
                 technical: 0.6,
                 sentiment: 0.0,

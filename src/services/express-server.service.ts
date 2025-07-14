@@ -2,12 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { config } from '@/config';
-import { logger, apiLogger, createRequestLogger } from '@/utils/logger';
-import { errorHandler } from '@/middleware/error-handler';
-import { predictionRoutes } from '@/routes/prediction.routes';
-import { analyticsRoutes } from '@/routes/analytics.routes';
-import { healthRoutes } from '@/routes/health.routes';
+import { config } from '../config';
+import { logger, apiLogger, createRequestLogger } from '../utils/logger';
+import { errorHandler } from '../middleware/error-handler';
+import { predictionRoutes } from '../routes/prediction.routes';
+import { analyticsRoutes } from '../routes/analytics.routes';
+import { healthRoutes } from '../routes/health.routes';
 
 export class ExpressServer
 {

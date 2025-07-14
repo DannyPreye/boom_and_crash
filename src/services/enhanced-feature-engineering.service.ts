@@ -59,9 +59,32 @@ export class EnhancedFeatureEngineeringService
     generateEnhancedFeatures(symbol: string, intervalSeconds: number = 60): EnhancedMarketFeatures
     {
         const ticks = this.tickBuffers.get(symbol) || [];
-        const candles = this.generateCandlesFromTicks(ticks, intervalSeconds);
+        let candles = this.generateCandlesFromTicks(ticks, intervalSeconds);
+
+        console.log(`🔍 Enhanced Features Debug - Symbol: ${symbol}`);
+        console.log(`📊 Ticks available: ${ticks.length}`);
+        console.log(`🕯️ Candles generated: ${candles.length}`);
+        console.log(`📈 Last few tick prices:`, ticks.slice(-5).map(t => t.quote));
+        console.log(`🕯️ Last few candle closes:`, candles.slice(-5).map(c => c.close));
+
+        // If we don't have enough candles, try with a shorter interval
+        if (candles.length < 20 && ticks.length >= 50) {
+            console.log(`⚠️ Insufficient candles (${candles.length} < 20), trying with shorter interval...`);
+
+            // Try different intervals: 30s, 15s, 10s, 5s
+            const intervals = [ 30, 15, 10, 5 ];
+            for (const interval of intervals) {
+                candles = this.generateCandlesFromTicks(ticks, interval);
+                console.log(`   🕯️ Tried ${interval}s interval: ${candles.length} candles`);
+                if (candles.length >= 20) {
+                    console.log(`   ✅ Found sufficient candles with ${interval}s interval`);
+                    break;
+                }
+            }
+        }
 
         if (candles.length < 20) {
+            console.log(`⚠️ Insufficient candles (${candles.length} < 20), using default features`);
             return this.getDefaultEnhancedFeatures(symbol);
         }
 
@@ -70,6 +93,15 @@ export class EnhancedFeatureEngineeringService
         const marketRegime = this.analyzeMarketRegime(candles, technicalIndicators);
         const spikeAnalysis = this.generateSpikeAnalysis(symbol);
         const sessionStrength = this.calculateSessionStrength();
+
+        console.log(`🔧 Technical Indicators calculated:`);
+        console.log(`   RSI: ${technicalIndicators.rsi.toFixed(2)}`);
+        console.log(`   MACD Line: ${technicalIndicators.macd_line.toFixed(4)}`);
+        console.log(`   MACD Signal: ${technicalIndicators.macd_signal.toFixed(4)}`);
+        console.log(`   Stochastic: ${technicalIndicators.stochastic.toFixed(2)}`);
+        console.log(`   Williams %R: ${technicalIndicators.williams_r.toFixed(2)}`);
+        console.log(`   ATR: ${technicalIndicators.atr.toFixed(4)}`);
+        console.log(`   Bollinger Position: ${technicalIndicators.bollinger_position.toFixed(2)}`);
 
         return {
             // Original features for backward compatibility
@@ -915,6 +947,13 @@ export class EnhancedFeatureEngineeringService
     {
         if (ticks.length === 0) return [];
 
+        console.log(`🕯️ Candle Generation Debug:`);
+        console.log(`   📊 Input ticks: ${ticks.length}`);
+        console.log(`   ⏱️ Interval: ${intervalSeconds} seconds`);
+        const firstTick = ticks[ 0 ];
+        const lastTick = ticks[ ticks.length - 1 ];
+        console.log(`   📅 Time range: ${firstTick?.epoch ? new Date(firstTick.epoch).toISOString() : 'N/A'} to ${lastTick?.epoch ? new Date(lastTick.epoch).toISOString() : 'N/A'}`);
+
         const candles: DerivCandleData[] = [];
         const intervals = new Map<number, DerivTickData[]>();
 
@@ -925,6 +964,11 @@ export class EnhancedFeatureEngineeringService
             intervalTicks.push(tick);
             intervals.set(intervalKey, intervalTicks);
         }
+
+        console.log(`   🗂️ Unique intervals: ${intervals.size}`);
+        console.log(`   📈 Interval distribution:`, Array.from(intervals.entries()).map(([ epoch, ticks ]) =>
+            `${new Date(epoch).toISOString()}: ${ticks.length} ticks`
+        ));
 
         // Convert each interval to a candle
         for (const [ epoch, intervalTicks ] of intervals) {
@@ -950,6 +994,21 @@ export class EnhancedFeatureEngineeringService
             }
         }
 
-        return candles.sort((a, b) => a.epoch - b.epoch);
+        const sortedCandles = candles.sort((a, b) => a.epoch - b.epoch);
+
+        console.log(`   🕯️ Generated ${sortedCandles.length} candles`);
+        if (sortedCandles.length > 0) {
+            const sampleCandle = sortedCandles[ 0 ];
+            console.log(`   📊 Sample candle:`, {
+                symbol: sampleCandle?.symbol || 'N/A',
+                open: sampleCandle?.open || 0,
+                high: sampleCandle?.high || 0,
+                low: sampleCandle?.low || 0,
+                close: sampleCandle?.close || 0,
+                epoch: sampleCandle?.epoch ? new Date(sampleCandle.epoch).toISOString() : 'N/A'
+            });
+        }
+
+        return sortedCandles;
     }
 }

@@ -16,7 +16,7 @@ const envSchema = z.object({
     DERIV_APP_ID: z.string().min(1),
 
     // Google Gemini
-    GOOGLE_API_KEY: z.string().min(1),
+    GEMINI_API_KEY: z.string().min(1),
     GEMINI_MODEL: z.string().default('gemini-2.5-pro'),
 
     // Redis
@@ -79,7 +79,7 @@ export const config = {
     },
 
     gemini: {
-        apiKey: env.GOOGLE_API_KEY,
+        apiKey: env.GEMINI_API_KEY,
         model: env.GEMINI_MODEL,
     },
 

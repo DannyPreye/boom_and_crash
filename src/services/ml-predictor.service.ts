@@ -1,528 +1,544 @@
-import { DerivCandleData } from '../types/deriv.types';
-import { EnhancedMarketFeatures } from '../types/enhanced-features.types';
+import { AutonomousPredictionResult } from '../agents/autonomous-trading-agent';
+import { logger } from '../utils/logger';
+import { TechnicalIndicators } from '../types/prediction.types';
+import { ChatAnthropic } from "@langchain/anthropic";
+import { HumanMessage } from '@langchain/core/messages';
 
-/**
- * Machine Learning Predictor Service
- * Uses statistical models and ensemble methods for price prediction
- */
-export class MachineLearningPredictor
+interface LLMPrediction
 {
+    direction: 'UP' | 'DOWN' | 'NEUTRAL';
+    confidence: number;
+    reasoning: string;
+    timeframe: string;
+    risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+    entry_price?: number;
+    stop_loss?: number;
+    take_profit?: number;
+}
 
-    /**
-     * Generate prediction using multiple ML models
-     */
-    async generatePrediction(
-        historicalData: DerivCandleData[],
-        enhancedFeatures: EnhancedMarketFeatures,
-        advancedIndicators: any
-    ): Promise<any>
+interface StatisticalPrediction
+{
+    direction: 'UP' | 'DOWN' | 'NEUTRAL';
+    confidence: number;
+    method: string;
+}
+
+export class MLPredictorService
+{
+    private llm: ChatAnthropic;
+
+    constructor (apiKey: string)
+    {
+        this.llm = new ChatAnthropic({
+            apiKey,
+            model: 'claude-sonnet-4-20250514',
+            temperature: 0.1,
+            maxTokens: 2000,
+        });
+    }
+
+    async predictNextTick(
+        marketData: { currentPrice: number; priceHistory: number[]; },
+        technicalIndicators: TechnicalIndicators,
+        patterns: any,
+        volumeAnalysis: any
+    ): Promise<AutonomousPredictionResult>
     {
         try {
-            // Extract features for ML models
-            const features = this.extractFeatures(historicalData, enhancedFeatures, advancedIndicators);
+            logger.info('Starting LLM-based prediction analysis');
 
-            // Generate predictions from different models
-            const randomForest = this.randomForestPrediction(features);
-            const lstm = this.lstmPrediction(features);
-            const xgboost = this.xgboostPrediction(features);
+            console.log('🔍 ML Predictor Debug - Technical Indicators received:');
+            console.log(`   RSI: ${technicalIndicators.rsi?.toFixed(2) || 'N/A'}`);
+            console.log(`   MACD Signal: ${technicalIndicators.macd_signal?.toFixed(4) || 'N/A'}`);
+            console.log(`   Bollinger Position: ${technicalIndicators.bollinger_position?.toFixed(2) || 'N/A'}`);
+            console.log(`   EMA Short: ${technicalIndicators.ema_short?.toFixed(2) || 'N/A'}`);
+            console.log(`   EMA Long: ${technicalIndicators.ema_long?.toFixed(2) || 'N/A'}`);
+            console.log(`   ADX: ${technicalIndicators.adx?.toFixed(2) || 'N/A'}`);
+            console.log(`   Stochastic: ${technicalIndicators.stochastic?.toFixed(2) || 'N/A'}`);
+            console.log(`   Williams %R: ${technicalIndicators.williams_r?.toFixed(2) || 'N/A'}`);
+            console.log(`   Current Price: ${marketData.currentPrice}`);
+            console.log(`   Price History Length: ${marketData.priceHistory.length}`);
 
-            // Ensemble prediction
-            const ensemble = this.ensemblePrediction([ randomForest, lstm, xgboost ]);
+            // Get LLM prediction
+            const llmPrediction = await this.getLLMPrediction(
+                marketData,
+                technicalIndicators,
+                patterns,
+                volumeAnalysis
+            );
 
-            // Feature importance analysis
-            const featureImportance = this.analyzeFeatureImportance(features);
+            // Get statistical fallback prediction
+            const statisticalPrediction = this.getStatisticalPrediction(
+                marketData,
+                technicalIndicators
+            );
 
-            return {
-                models: {
-                    randomForest,
-                    lstm,
-                    xgboost
-                },
-                ensemble,
-                featureImportance,
-                confidence: this.calculateModelConfidence([ randomForest, lstm, xgboost ])
-            };
+            // Combine predictions using ensemble approach
+            const finalPrediction = this.combinePredictions(
+                llmPrediction,
+                statisticalPrediction,
+                marketData.currentPrice
+            );
+
+            logger.info('LLM prediction completed', {
+                llmDirection: llmPrediction.direction,
+                llmConfidence: llmPrediction.confidence,
+                statisticalDirection: statisticalPrediction.direction,
+                statisticalConfidence: statisticalPrediction.confidence,
+                finalDirection: finalPrediction.prediction,
+                finalConfidence: finalPrediction.confidence
+            });
+
+            return finalPrediction;
         } catch (error) {
-            console.error('ML prediction failed:', error);
-            return this.getDefaultMLPrediction();
+            logger.error('Error in LLM prediction', { error });
+            // Fallback to statistical prediction only
+            const fallbackPrediction = this.getStatisticalPrediction(
+                marketData,
+                technicalIndicators
+            );
+            return this.buildFallbackResult(fallbackPrediction, marketData.currentPrice);
         }
     }
 
-    /**
-     * Extract features for ML models
-     */
-    private extractFeatures(
-        historicalData: DerivCandleData[],
-        enhancedFeatures: EnhancedMarketFeatures,
-        advancedIndicators: any
-    ): any
+    private async getLLMPrediction(
+        marketData: { currentPrice: number; priceHistory: number[]; },
+        technicalIndicators: TechnicalIndicators,
+        patterns: any,
+        volumeAnalysis: any
+    ): Promise<LLMPrediction>
     {
-        if (historicalData.length < 20) {
-            return this.getDefaultFeatures();
+        const prompt = this.buildAnalysisPrompt(
+            marketData,
+            technicalIndicators,
+            patterns,
+            volumeAnalysis
+        );
+
+        try {
+            const response = await this.llm.invoke([ new HumanMessage(prompt) ]);
+            const content = response.content as string;
+
+            return this.parseLLMResponse(content);
+        } catch (error) {
+            logger.error('LLM API error', { error });
+            throw new Error(`LLM API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private buildAnalysisPrompt(
+        marketData: { currentPrice: number; priceHistory: number[]; },
+        technicalIndicators: TechnicalIndicators,
+        patterns: any,
+        volumeAnalysis: any
+    ): string
+    {
+        const currentPrice = marketData.currentPrice;
+        const priceHistory = marketData.priceHistory.slice(-20); // Last 20 prices
+
+        // Fix: Add null checks for priceHistory
+        if (priceHistory.length === 0) {
+            return this.buildFallbackPrompt(currentPrice, technicalIndicators);
         }
 
-        const prices = historicalData.map(c => c.close);
-        const volumes = historicalData.map(c => c.volume || 1000);
-        const highs = historicalData.map(c => c.high);
-        const lows = historicalData.map(c => c.low);
+        const firstPrice = priceHistory[ 0 ];
+        if (firstPrice === undefined || firstPrice === 0) {
+            return this.buildFallbackPrompt(currentPrice, technicalIndicators);
+        }
 
-        // Technical indicators
-        const rsi = enhancedFeatures.technical_indicators.rsi;
-        const macd = enhancedFeatures.technical_indicators.macd_line;
-        const macdSignal = enhancedFeatures.technical_indicators.macd_signal;
-        const macdHistogram = enhancedFeatures.technical_indicators.macd_histogram;
-        const atr = enhancedFeatures.technical_indicators.atr;
-        const stochastic = enhancedFeatures.technical_indicators.stochastic;
-        const williamsR = enhancedFeatures.technical_indicators.williams_r;
+        const priceChange = ((currentPrice - firstPrice) / firstPrice) * 100;
 
-        // Price-based features
-        const priceChange = this.calculatePriceChange(prices);
-        const priceMomentum = this.calculatePriceMomentum(prices);
-        const volatility = this.calculateVolatility(prices);
-        const trendStrength = this.calculateTrendStrength(prices);
+        return `You are a professional financial analyst specializing in binary options trading. Provide precise, data-driven analysis in valid JSON format only.
 
-        // Volume-based features
-        const volumeChange = this.calculateVolumeChange(volumes);
-        const volumeMomentum = this.calculateVolumeMomentum(volumes);
-        const volumeRatio = this.calculateVolumeRatio(volumes);
+Analyze the following market data for binary options trading and provide your prediction in valid JSON format only.
 
-        // Advanced indicators
-        const ichimokuCloudPosition = advancedIndicators?.ichimoku?.cloudPosition === 'ABOVE' ? 1 :
-            advancedIndicators?.ichimoku?.cloudPosition === 'BELOW' ? -1 : 0;
-        const fibonacciPosition = advancedIndicators?.fibonacci?.currentPosition || 0.5;
-        const elliottWavePosition = advancedIndicators?.elliottWave?.wavePosition || 0.5;
+CURRENT MARKET DATA:
+- Current Price: ${currentPrice}
+- Price Change (last 20 ticks): ${priceChange.toFixed(2)}%
+- Recent Price Trend: ${this.getPriceTrend(priceHistory)}
 
-        // Market regime features
-        const volatilityState = this.encodeVolatilityState(enhancedFeatures.market_regime.volatility_state);
-        const trendState = this.encodeTrendState(enhancedFeatures.market_regime.trend_state);
-        const momentumState = this.encodeMomentumState(enhancedFeatures.market_regime.momentum_state);
+TECHNICAL INDICATORS:
+- RSI: ${technicalIndicators.rsi?.toFixed(2) || 'N/A'}
+- MACD Signal: ${technicalIndicators.macd_signal?.toFixed(4) || 'N/A'}
+- Bollinger Position: ${technicalIndicators.bollinger_position?.toFixed(2) || 'N/A'}
+- EMA Short: ${technicalIndicators.ema_short?.toFixed(2) || 'N/A'}
+- EMA Long: ${technicalIndicators.ema_long?.toFixed(2) || 'N/A'}
+- ADX: ${technicalIndicators.adx?.toFixed(2) || 'N/A'}
+- Stochastic: ${technicalIndicators.stochastic?.toFixed(2) || 'N/A'}
+- Williams %R: ${technicalIndicators.williams_r?.toFixed(2) || 'N/A'}
 
-        return {
-            // Technical indicators
-            rsi: rsi / 100, // Normalize to 0-1
-            macd: this.normalizeMACD(macd),
-            macdSignal: this.normalizeMACD(macdSignal),
-            macdHistogram: this.normalizeMACD(macdHistogram),
-            atr: this.normalizeATR(atr, prices),
-            stochastic: stochastic / 100, // Normalize to 0-1
-            williamsR: (williamsR + 100) / 100, // Normalize to 0-1
+PATTERN ANALYSIS:
+${this.formatPatterns(patterns)}
 
-            // Price features
-            priceChange,
-            priceMomentum,
-            volatility,
-            trendStrength,
+VOLUME ANALYSIS:
+${this.formatVolumeAnalysis(volumeAnalysis)}
 
-            // Volume features
-            volumeChange,
-            volumeMomentum,
-            volumeRatio,
+ANALYSIS REQUIREMENTS:
+1. Consider all technical indicators and their relationships
+2. Evaluate pattern strength and reliability
+3. Assess volume confirmation
+4. Consider market momentum and trend strength
+5. Factor in volatility (if available)
+6. Evaluate risk-reward ratio
 
-            // Advanced indicators
-            ichimokuCloudPosition,
-            fibonacciPosition,
-            elliottWavePosition,
+RESPONSE FORMAT (valid JSON only):
+{
+  "direction": "UP|DOWN|NEUTRAL",
+  "confidence": 0.0-1.0,
+  "reasoning": "Detailed analysis explanation",
+  "timeframe": "1m|5m|15m",
+  "risk_level": "LOW|MEDIUM|HIGH",
+  "entry_price": number (optional),
+  "stop_loss": number (optional),
+  "take_profit": number (optional)
+}
 
-            // Market regime
-            volatilityState,
-            trendState,
-            momentumState,
-            confluenceScore: enhancedFeatures.market_regime.confluence_score,
-
-            // Session features
-            sessionStrength: enhancedFeatures.session_strength,
-            sessionVolatilityAdjustment: enhancedFeatures.session_volatility_adjustment,
-            symbolMomentum: enhancedFeatures.symbol_momentum,
-            volatilityRank: enhancedFeatures.volatility_rank
-        };
+Provide only the JSON response, no additional text.`;
     }
 
-    /**
-     * Random Forest prediction
-     */
-    private randomForestPrediction(features: any): any
+    private buildFallbackPrompt(currentPrice: number, technicalIndicators: TechnicalIndicators): string
     {
-        // Simplified Random Forest implementation
-        const featureWeights = {
-            rsi: 0.15,
-            macd: 0.12,
-            macdHistogram: 0.10,
-            priceMomentum: 0.08,
-            volatility: 0.07,
-            volumeRatio: 0.06,
-            trendStrength: 0.05,
-            confluenceScore: 0.05,
-            ichimokuCloudPosition: 0.04,
-            sessionStrength: 0.03,
-            stochastic: 0.03,
-            williamsR: 0.03,
-            fibonacciPosition: 0.02,
-            elliottWavePosition: 0.02,
-            volumeMomentum: 0.02,
-            priceChange: 0.02,
-            volumeChange: 0.01
-        };
+        return `You are a professional financial analyst specializing in binary options trading. Provide precise, data-driven analysis in valid JSON format only.
 
-        const prediction = this.weightedPrediction(features, featureWeights);
-        const confidence = this.calculateModelConfidence([ prediction ]);
+CURRENT MARKET DATA:
+- Current Price: ${currentPrice}
+- Price Change: Insufficient data
+- Recent Price Trend: Insufficient data
 
-        return {
-            prediction: prediction > 0.5 ? 'UP' : 'DOWN',
-            confidence: Math.max(0.5, Math.min(0.95, confidence)),
-            probability: prediction
-        };
+TECHNICAL INDICATORS:
+- RSI: ${technicalIndicators.rsi?.toFixed(2) || 'N/A'}
+- MACD Signal: ${technicalIndicators.macd_signal?.toFixed(4) || 'N/A'}
+- Bollinger Position: ${technicalIndicators.bollinger_position?.toFixed(2) || 'N/A'}
+- EMA Short: ${technicalIndicators.ema_short?.toFixed(2) || 'N/A'}
+- EMA Long: ${technicalIndicators.ema_long?.toFixed(2) || 'N/A'}
+- ADX: ${technicalIndicators.adx?.toFixed(2) || 'N/A'}
+- Stochastic: ${technicalIndicators.stochastic?.toFixed(2) || 'N/A'}
+- Williams %R: ${technicalIndicators.williams_r?.toFixed(2) || 'N/A'}
+
+PATTERN ANALYSIS:
+No pattern data available
+
+VOLUME ANALYSIS:
+No volume data available
+
+ANALYSIS REQUIREMENTS:
+1. Consider available technical indicators
+2. Evaluate current market conditions
+3. Provide conservative analysis given limited data
+
+RESPONSE FORMAT (valid JSON only):
+{
+  "direction": "UP|DOWN|NEUTRAL",
+  "confidence": 0.0-1.0,
+  "reasoning": "Detailed analysis explanation",
+  "timeframe": "1m|5m|15m",
+  "risk_level": "LOW|MEDIUM|HIGH",
+  "entry_price": number (optional),
+  "stop_loss": number (optional),
+  "take_profit": number (optional)
+}
+
+Provide only the JSON response, no additional text.`;
     }
 
-    /**
-     * LSTM Neural Network prediction
-     */
-    private lstmPrediction(features: any): any
+    private formatPatterns(patterns: any): string
     {
-        // Simplified LSTM implementation focusing on sequential patterns
-        const sequentialFeatures = [
-            features.priceMomentum,
-            features.volumeMomentum,
-            features.trendStrength,
-            features.macdHistogram,
-            features.rsi
-        ];
-
-        // LSTM-like pattern recognition
-        const trendConsistency = this.calculateTrendConsistency(sequentialFeatures);
-        const patternStrength = this.calculatePatternStrength(sequentialFeatures);
-
-        const prediction = (trendConsistency + patternStrength) / 2;
-        const confidence = 0.6 + (patternStrength * 0.3);
-
-        return {
-            prediction: prediction > 0.5 ? 'UP' : 'DOWN',
-            confidence: Math.max(0.5, Math.min(0.95, confidence)),
-            probability: prediction
-        };
+        if (!patterns || typeof patterns !== 'object') {
+            return 'No pattern data available';
+        }
+        // FIX 3: Explicitly type array
+        const patternInfo: string[] = [];
+        if (patterns.chart?.patterns) {
+            for (const pattern of patterns.chart.patterns) {
+                patternInfo.push(`- ${pattern.name}: ${pattern.direction} (confidence: ${pattern.confidence})`);
+            }
+        }
+        if (patterns.support_resistance) {
+            patternInfo.push(`- Support: ${patterns.support_resistance.support}`);
+            patternInfo.push(`- Resistance: ${patterns.support_resistance.resistance}`);
+        }
+        return patternInfo.length > 0 ? patternInfo.join('\n') : 'No specific patterns detected';
     }
 
-    /**
-     * XGBoost prediction
-     */
-    private xgboostPrediction(features: any): any
+    private formatVolumeAnalysis(volumeAnalysis: any): string
     {
-        // Simplified XGBoost implementation with gradient boosting
-        const basePrediction = 0.5;
-        const learningRate = 0.1;
-
-        // Multiple boosting rounds
-        let prediction = basePrediction;
-
-        // Round 1: Technical indicators
-        prediction += learningRate * this.boostRound(features.rsi, features.macd, features.stochastic);
-
-        // Round 2: Price and volume
-        prediction += learningRate * this.boostRound(features.priceMomentum, features.volumeRatio, features.trendStrength);
-
-        // Round 3: Advanced indicators
-        prediction += learningRate * this.boostRound(features.ichimokuCloudPosition, features.fibonacciPosition, features.confluenceScore);
-
-        // Round 4: Market regime
-        prediction += learningRate * this.boostRound(features.volatilityState, features.trendState, features.momentumState);
-
-        const confidence = 0.65 + (Math.abs(prediction - 0.5) * 0.3);
-
-        return {
-            prediction: prediction > 0.5 ? 'UP' : 'DOWN',
-            confidence: Math.max(0.5, Math.min(0.95, confidence)),
-            probability: Math.max(0, Math.min(1, prediction))
-        };
+        if (!volumeAnalysis || typeof volumeAnalysis !== 'object') {
+            return 'No volume data available';
+        }
+        // FIX 3: Explicitly type array
+        const volumeInfo: string[] = [];
+        if (volumeAnalysis.volume_trend) {
+            volumeInfo.push(`- Volume Trend: ${volumeAnalysis.volume_trend}`);
+        }
+        if (volumeAnalysis.volume_sma) {
+            volumeInfo.push(`- Volume SMA: ${volumeAnalysis.volume_sma}`);
+        }
+        if (volumeAnalysis.volume_ratio) {
+            volumeInfo.push(`- Volume Ratio: ${volumeAnalysis.volume_ratio}`);
+        }
+        return volumeInfo.length > 0 ? volumeInfo.join('\n') : 'No volume analysis available';
     }
 
-    /**
-     * Ensemble prediction combining all models
-     */
-    private ensemblePrediction(models: any[]): any
+    private getPriceTrend(priceHistory: number[]): string
     {
-        const predictions = models.map(m => m.probability);
-        const confidences = models.map(m => m.confidence);
+        if (priceHistory.length < 3) return 'Insufficient data';
 
-        // Weighted average based on confidence
-        const totalWeight = confidences.reduce((a, b) => a + b, 0);
-        const weightedPrediction = predictions.reduce((sum, pred, i) =>
-            sum + (pred * confidences[ i ]), 0) / totalWeight;
+        const recent = priceHistory.slice(-3);
+        const first = recent[ 0 ];
+        const last = recent[ recent.length - 1 ];
 
-        const ensembleConfidence = confidences.reduce((a, b) => a + b, 0) / confidences.length;
+        // Fix: Add null checks
+        if (first === undefined || last === undefined) {
+            return 'Insufficient data';
+        }
 
-        // Agreement bonus
-        const agreement = this.calculateModelAgreement(models);
-        const finalConfidence = ensembleConfidence + (agreement * 0.1);
-
-        return {
-            prediction: weightedPrediction > 0.5 ? 'UP' : 'DOWN',
-            confidence: Math.max(0.5, Math.min(0.95, finalConfidence)),
-            probability: weightedPrediction,
-            agreement
-        };
+        if (last > first * 1.001) return 'Uptrend';
+        if (last < first * 0.999) return 'Downtrend';
+        return 'Sideways';
     }
 
-    /**
-     * Analyze feature importance
-     */
-    private analyzeFeatureImportance(features: any): string[]
+    private parseLLMResponse(content: string): LLMPrediction
     {
-        const importanceScores: Array<{ feature: string; score: number; }> = [];
+        // Try multiple parsing approaches
+        let parsed: any = null;
 
-        // Calculate importance based on feature variance and correlation with prediction
-        for (const [ feature, value ] of Object.entries(features)) {
-            if (typeof value === 'number') {
-                const score = Math.abs(value - 0.5) * 2; // Distance from neutral
-                importanceScores.push({ feature, score });
+        console.log('LLM Response:', content);
+
+        // Method 1: Direct JSON parsing
+        try {
+            parsed = JSON.parse(content);
+        } catch (e) {
+            logger.warn('Direct JSON parsing failed, trying to extract JSON');
+        }
+
+        // Method 2: Extract JSON from markdown code blocks
+        if (!parsed) {
+            const jsonMatch = content.match(/```json\s*(\{.*?\})\s*```/s);
+            if (jsonMatch && jsonMatch[ 1 ]) {
+                try {
+                    parsed = JSON.parse(jsonMatch[ 1 ]);
+                } catch (e) {
+                    logger.warn('JSON extraction from markdown failed');
+                }
             }
         }
 
-        // Sort by importance and return top features
-        return importanceScores
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 5)
-            .map(item => item.feature);
-    }
-
-    /**
-     * Calculate model confidence
-     */
-    private calculateModelConfidence(models: any[]): number
-    {
-        if (models.length === 0) return 0.5;
-
-        const confidences = models.map(m => m.confidence || 0.5);
-        return confidences.reduce((a, b) => a + b, 0) / confidences.length;
-    }
-
-    /**
-     * Helper methods for feature extraction
-     */
-    private calculatePriceChange(prices: number[]): number
-    {
-        if (prices.length < 2) return 0;
-        return ((prices[ prices.length - 1 ] ?? 0) - (prices[ 0 ] ?? 1)) / (prices[ 0 ] ?? 1);
-    }
-
-    private calculatePriceMomentum(prices: number[]): number
-    {
-        if (prices.length < 5) return 0;
-        const recent = prices.slice(-5);
-        return ((recent[ recent.length - 1 ] ?? 0) - (recent[ 0 ] ?? 1)) / (recent[ 0 ] ?? 1);
-    }
-
-    private calculateVolatility(prices: number[]): number
-    {
-        if (prices.length < 10) return 0;
-        const returns = [];
-        for (let i = 1; i < prices.length; i++) {
-            returns.push(((prices[ i ] ?? 0) - (prices[ i - 1 ] ?? 1)) / (prices[ i - 1 ] ?? 1));
-        }
-        const mean = returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
-        const variance = returns.length ? returns.reduce((sum, ret) => sum + Math.pow(ret - mean, 2), 0) / returns.length : 0;
-        return Math.sqrt(variance);
-    }
-
-    private calculateTrendStrength(prices: number[]): number
-    {
-        if (prices.length < 10) return 0.5;
-        const recent = prices.slice(-10);
-        const trend = this.calculateLinearTrend(recent);
-        return Math.max(0, Math.min(1, (trend + 1) / 2));
-    }
-
-    private calculateVolumeChange(volumes: number[]): number
-    {
-        if (volumes.length < 2) return 0;
-        return ((volumes[ volumes.length - 1 ] ?? 0) - (volumes[ 0 ] ?? 1)) / (volumes[ 0 ] ?? 1);
-    }
-
-    private calculateVolumeMomentum(volumes: number[]): number
-    {
-        if (volumes.length < 5) return 0;
-        const recent = volumes.slice(-5);
-        return ((recent[ recent.length - 1 ] ?? 0) - (recent[ 0 ] ?? 1)) / (recent[ 0 ] ?? 1);
-    }
-
-    private calculateVolumeRatio(volumes: number[]): number
-    {
-        if (volumes.length < 10) return 1;
-        const currentVolume = volumes[ volumes.length - 1 ] ?? 1;
-        const avgVolume = volumes.slice(-10).reduce((a, b) => a + b, 0) / 10 || 1;
-        return currentVolume / avgVolume;
-    }
-
-    /**
-     * Normalization helpers
-     */
-    private normalizeMACD(value: number): number
-    {
-        return Math.max(-1, Math.min(1, value * 100));
-    }
-
-    private normalizeATR(atr: number, prices: number[]): number
-    {
-        if (prices.length === 0) return 0;
-        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-        return atr / avgPrice;
-    }
-
-    /**
-     * Encoding helpers
-     */
-    private encodeVolatilityState(state: string): number
-    {
-        const encoding: Record<string, number> = {
-            'LOW': 0.25,
-            'NORMAL': 0.5,
-            'HIGH': 0.75,
-            'EXTREME': 1.0
-        };
-        return encoding[ state ] || 0.5;
-    }
-
-    private encodeTrendState(state: string): number
-    {
-        const encoding: Record<string, number> = {
-            'STRONG_UP': 1.0,
-            'WEAK_UP': 0.75,
-            'SIDEWAYS': 0.5,
-            'WEAK_DOWN': 0.25,
-            'STRONG_DOWN': 0.0
-        };
-        return encoding[ state ] || 0.5;
-    }
-
-    private encodeMomentumState(state: string): number
-    {
-        const encoding: Record<string, number> = {
-            'ACCELERATING': 1.0,
-            'STEADY': 0.5,
-            'DECELERATING': 0.0
-        };
-        return encoding[ state ] || 0.5;
-    }
-
-    /**
-     * ML algorithm helpers
-     */
-    private weightedPrediction(features: any, weights: Record<string, number>): number
-    {
-        let weightedSum = 0;
-        let totalWeight = 0;
-
-        for (const [ feature, weight ] of Object.entries(weights)) {
-            if (features[ feature ] !== undefined) {
-                weightedSum += features[ feature ] * weight;
-                totalWeight += weight;
+        // Method 3: Extract JSON from code blocks without language
+        if (!parsed) {
+            const codeMatch = content.match(/```\s*(\{.*?\})\s*```/s);
+            if (codeMatch && codeMatch[ 1 ]) {
+                try {
+                    parsed = JSON.parse(codeMatch[ 1 ]);
+                } catch (e) {
+                    logger.warn('JSON extraction from code block failed');
+                }
             }
         }
 
-        return totalWeight > 0 ? weightedSum / totalWeight : 0.5;
-    }
-
-    private calculateTrendConsistency(features: number[]): number
-    {
-        if (features.length < 2) return 0.5;
-
-        let consistentCount = 0;
-        for (let i = 1; i < features.length; i++) {
-            if (((features[ i ] ?? 0) > 0.5 && (features[ i - 1 ] ?? 0) > 0.5) ||
-                ((features[ i ] ?? 0) < 0.5 && (features[ i - 1 ] ?? 0) < 0.5)) {
-                consistentCount++;
+        // Method 4: Find JSON object in text
+        if (!parsed) {
+            const jsonObjectMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonObjectMatch) {
+                try {
+                    parsed = JSON.parse(jsonObjectMatch[ 0 ]);
+                } catch (e) {
+                    logger.warn('JSON object extraction failed');
+                }
             }
         }
 
-        return consistentCount / (features.length - 1);
+        if (!parsed) {
+            throw new Error('Failed to parse LLM response as JSON');
+        }
+
+        // Validate and provide fallbacks
+        return this.validateAndSanitizePrediction(parsed);
     }
 
-    private calculatePatternStrength(features: number[]): number
+    private validateAndSanitizePrediction(parsed: any): LLMPrediction
     {
-        if (features.length < 3) return 0.5;
+        const validDirections = [ 'UP', 'DOWN', 'NEUTRAL' ];
+        const validRiskLevels = [ 'LOW', 'MEDIUM', 'HIGH' ];
+        const validTimeframes = [ '1m', '5m', '15m' ];
 
-        const variance = this.calculateVariance(features);
-        return Math.max(0, 1 - variance);
-    }
-
-    private calculateVariance(values: number[]): number
-    {
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-        return variance;
-    }
-
-    private boostRound(feature1: number, feature2: number, feature3: number): number
-    {
-        return (feature1 + feature2 + feature3) / 3 - 0.5;
-    }
-
-    private calculateLinearTrend(values: number[]): number
-    {
-        if (values.length < 2) return 0;
-
-        const x1 = 0;
-        const y1 = values[ 0 ] ?? 0;
-        const x2 = values.length - 1;
-        const y2 = values[ values.length - 1 ] ?? 0;
-
-        return (y2 - y1) / (x2 - x1);
-    }
-
-    private calculateModelAgreement(models: any[]): number
-    {
-        if (models.length < 2) return 1;
-
-        const predictions = models.map(m => m.prediction);
-        const upCount = predictions.filter(p => p === 'UP').length;
-        const downCount = predictions.filter(p => p === 'DOWN').length;
-
-        return Math.max(upCount, downCount) / predictions.length;
-    }
-
-    /**
-     * Default values
-     */
-    private getDefaultFeatures(): any
-    {
         return {
-            rsi: 0.5,
-            macd: 0,
-            macdSignal: 0,
-            macdHistogram: 0,
-            atr: 0,
-            stochastic: 0.5,
-            williamsR: 0.5,
-            priceChange: 0,
-            priceMomentum: 0,
-            volatility: 0,
-            trendStrength: 0.5,
-            volumeChange: 0,
-            volumeMomentum: 0,
-            volumeRatio: 1,
-            ichimokuCloudPosition: 0,
-            fibonacciPosition: 0.5,
-            elliottWavePosition: 0.5,
-            volatilityState: 0.5,
-            trendState: 0.5,
-            momentumState: 0.5,
-            confluenceScore: 0.5,
-            sessionStrength: 0.5,
-            sessionVolatilityAdjustment: 1,
-            symbolMomentum: 0.5,
-            volatilityRank: 0.5
+            direction: validDirections.includes(parsed.direction) ? parsed.direction : 'NEUTRAL',
+            confidence: this.clampNumber(parsed.confidence, 0, 1, 0.5),
+            reasoning: parsed.reasoning || 'No reasoning provided',
+            timeframe: validTimeframes.includes(parsed.timeframe) ? parsed.timeframe : '1m',
+            risk_level: validRiskLevels.includes(parsed.risk_level) ? parsed.risk_level : 'MEDIUM',
+            entry_price: typeof parsed.entry_price === 'number' ? parsed.entry_price : undefined,
+            stop_loss: typeof parsed.stop_loss === 'number' ? parsed.stop_loss : undefined,
+            take_profit: typeof parsed.take_profit === 'number' ? parsed.take_profit : undefined
         };
     }
 
-    private getDefaultMLPrediction(): any
+    private clampNumber(value: any, min: number, max: number, fallback: number): number
+    {
+        const num = typeof value === 'number' ? value : fallback;
+        return Math.max(min, Math.min(max, num));
+    }
+
+    private getStatisticalPrediction(
+        marketData: { currentPrice: number; priceHistory: number[]; },
+        technicalIndicators: TechnicalIndicators
+    ): StatisticalPrediction
+    {
+        // FIX 3: Explicitly type array
+        const signals: StatisticalPrediction[] = [];
+        // RSI signals
+        if (typeof technicalIndicators.rsi === 'number') {
+            if (technicalIndicators.rsi < 30) signals.push({ direction: 'UP', confidence: 0.7, method: 'RSI oversold' });
+            if (technicalIndicators.rsi > 70) signals.push({ direction: 'DOWN', confidence: 0.7, method: 'RSI overbought' });
+        }
+        // MACD Signal
+        if (typeof technicalIndicators.macd_signal === 'number') {
+            if (technicalIndicators.macd_signal > 0) {
+                signals.push({ direction: 'UP', confidence: 0.6, method: 'MACD bullish' });
+            } else if (technicalIndicators.macd_signal < 0) {
+                signals.push({ direction: 'DOWN', confidence: 0.6, method: 'MACD bearish' });
+            }
+        }
+        // Bollinger Position
+        if (typeof technicalIndicators.bollinger_position === 'number') {
+            if (technicalIndicators.bollinger_position < 0.2) {
+                signals.push({ direction: 'UP', confidence: 0.65, method: 'Price near lower Bollinger Band' });
+            } else if (technicalIndicators.bollinger_position > 0.8) {
+                signals.push({ direction: 'DOWN', confidence: 0.65, method: 'Price near upper Bollinger Band' });
+            }
+        }
+        // Stochastic
+        if (typeof technicalIndicators.stochastic === 'number') {
+            if (technicalIndicators.stochastic < 20) {
+                signals.push({ direction: 'UP', confidence: 0.6, method: 'Stochastic oversold' });
+            } else if (technicalIndicators.stochastic > 80) {
+                signals.push({ direction: 'DOWN', confidence: 0.6, method: 'Stochastic overbought' });
+            }
+        }
+        if (signals.length === 0) {
+            return { direction: 'NEUTRAL', confidence: 0.3, method: 'No clear signals' };
+        }
+        // Aggregate signals
+        const upSignals = signals.filter(s => s.direction === 'UP');
+        const downSignals = signals.filter(s => s.direction === 'DOWN');
+        if (upSignals.length > downSignals.length) {
+            const avgConfidence = upSignals.reduce((sum, s) => sum + s.confidence, 0) / upSignals.length;
+            return { direction: 'UP', confidence: avgConfidence, method: upSignals.map(s => s.method).join(', ') };
+        } else if (downSignals.length > upSignals.length) {
+            const avgConfidence = downSignals.reduce((sum, s) => sum + s.confidence, 0) / downSignals.length;
+            return { direction: 'DOWN', confidence: avgConfidence, method: downSignals.map(s => s.method).join(', ') };
+        } else {
+            return { direction: 'NEUTRAL', confidence: 0.4, method: 'Mixed signals' };
+        }
+    }
+
+    private buildFallbackResult(
+        stat: StatisticalPrediction,
+        currentPrice: number
+    ): AutonomousPredictionResult
     {
         return {
-            models: {
-                randomForest: { prediction: 'NEUTRAL', confidence: 0.5, probability: 0.5 },
-                lstm: { prediction: 'NEUTRAL', confidence: 0.5, probability: 0.5 },
-                xgboost: { prediction: 'NEUTRAL', confidence: 0.5, probability: 0.5 }
+            symbol: 'UNKNOWN',
+            timeframe: '1m',
+            prediction: stat.direction === 'UP' ? 'UP' : 'DOWN',
+            confidence: Math.max(0.5, Math.min(0.95, stat.confidence * 0.8)),
+            trading_levels: {
+                entry_price: currentPrice,
+                stop_loss: currentPrice * 0.985,
+                take_profit: currentPrice * 1.025,
+                risk_reward_ratio: 1.5,
+                max_drawdown_pips: Math.round(Math.abs(currentPrice * 0.015) * 10000),
+                target_pips: Math.round(Math.abs(currentPrice * 0.025) * 10000),
             },
-            ensemble: { prediction: 'NEUTRAL', confidence: 0.5, probability: 0.5, agreement: 1 },
-            featureImportance: [ 'rsi', 'macd', 'priceMomentum', 'volumeRatio', 'trendStrength' ],
-            confidence: 0.5
+            price_targets: {
+                immediate: currentPrice * 1.005,
+                short_term: currentPrice * 1.015,
+                medium_term: currentPrice * 1.025,
+            },
+            risk_management: {
+                position_size_suggestion: 0.02,
+                max_risk_per_trade: 0.015,
+                probability_of_success: Math.max(0.5, Math.min(0.95, stat.confidence * 0.8)),
+            },
+            multi_timeframe_analysis: 'Statistical fallback',
+            higher_timeframe_trend: 'SIDEWAYS',
+            intermediate_timeframe_momentum: 'NEUTRAL',
+            timeframe_confluence: 'WEAK',
+            market_structure_quality: 'MEDIUM',
+            confluence_bonus: 0.0,
+            analysis: stat.method,
+            reasoning: `Fallback prediction due to LLM error: ${stat.method}`,
+            factors: {
+                technical: stat.confidence,
+                sentiment: 0,
+                pattern: 0,
+                confluence: 0,
+                key_factors: [ stat.method ],
+            },
+        };
+    }
+
+    private combinePredictions(
+        llmPrediction: LLMPrediction,
+        statisticalPrediction: StatisticalPrediction,
+        currentPrice: number
+    ): AutonomousPredictionResult
+    {
+        // Weight LLM prediction more heavily (70%) but consider statistical as backup
+        const llmWeight = 0.7;
+        const statisticalWeight = 0.3;
+        let finalDirection: 'UP' | 'DOWN' | 'NEUTRAL';
+        let finalConfidence: number;
+        // If both predictions agree, boost confidence
+        if (llmPrediction.direction === statisticalPrediction.direction) {
+            finalDirection = llmPrediction.direction;
+            finalConfidence = Math.min(0.95,
+                (llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight) + 0.1
+            );
+        } else {
+            // If they disagree, go with LLM but reduce confidence
+            finalDirection = llmPrediction.direction;
+            finalConfidence = (llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight) * 0.5;
+        }
+        // Always return a full AutonomousPredictionResult
+        return {
+            symbol: 'UNKNOWN',
+            timeframe: '1m',
+            prediction: finalDirection === 'UP' ? 'UP' : 'DOWN',
+            confidence: Math.max(0.5, Math.min(0.95, finalConfidence)),
+            trading_levels: {
+                entry_price: llmPrediction.entry_price || currentPrice,
+                stop_loss: llmPrediction.stop_loss || (currentPrice * 0.985),
+                take_profit: llmPrediction.take_profit || (currentPrice * 1.025),
+                risk_reward_ratio: 1.5,
+                max_drawdown_pips: Math.round(Math.abs((llmPrediction.entry_price || currentPrice) - (llmPrediction.stop_loss || currentPrice * 0.985)) * 10000),
+                target_pips: Math.round(Math.abs((llmPrediction.take_profit || currentPrice * 1.025) - (llmPrediction.entry_price || currentPrice)) * 10000),
+            },
+            price_targets: {
+                immediate: llmPrediction.entry_price ? llmPrediction.entry_price * 1.005 : currentPrice * 1.005,
+                short_term: llmPrediction.entry_price ? llmPrediction.entry_price * 1.015 : currentPrice * 1.015,
+                medium_term: llmPrediction.entry_price ? llmPrediction.entry_price * 1.025 : currentPrice * 1.025,
+            },
+            risk_management: {
+                position_size_suggestion: 0.02,
+                max_risk_per_trade: 0.015,
+                probability_of_success: Math.max(0.5, Math.min(0.95, finalConfidence)),
+            },
+            multi_timeframe_analysis: 'LLM/statistical ensemble',
+            higher_timeframe_trend: 'SIDEWAYS',
+            intermediate_timeframe_momentum: 'NEUTRAL',
+            timeframe_confluence: 'MODERATE',
+            market_structure_quality: 'MEDIUM',
+            confluence_bonus: 0.0,
+            analysis: llmPrediction.reasoning,
+            reasoning: `LLM: ${llmPrediction.reasoning} | Statistical: ${statisticalPrediction.method}`,
+            factors: {
+                technical: llmPrediction.confidence,
+                sentiment: 0,
+                pattern: 0,
+                confluence: 0,
+                key_factors: [ llmPrediction.reasoning, statisticalPrediction.method ],
+            },
         };
     }
 }

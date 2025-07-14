@@ -1,14 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import
-    {
-        PredictionRequest,
-        PredictionResponse,
-        SyntheticSymbol,
-        Timeframe
-    } from '@/types/prediction.types';
-import { SUPPORTED_SYMBOLS, TIMEFRAMES } from '@/config';
-import { createApiError } from '@/middleware/error-handler';
+import { SyntheticSymbol, PredictionDirection, Timeframe, PredictionResponse } from '../types/prediction.types';
+import { SUPPORTED_SYMBOLS, TIMEFRAMES } from '../config';
+import { createApiError } from '../middleware/error-handler';
 
 const router = Router();
 

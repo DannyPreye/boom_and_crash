@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { DerivWebSocketService } from '@/services/deriv-websocket.service';
-import { FeatureEngineeringService } from '@/services/feature-engineering.service';
-import { GeminiAIService } from '@/services/gemini-ai.service';
+import { DerivWebSocketService } from '../services/deriv-websocket.service';
+import { FeatureEngineeringService } from '../services/feature-engineering.service';
+import { GeminiAIService } from '../services/gemini-ai.service';
 
 const router = Router();
 

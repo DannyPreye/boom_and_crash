@@ -178,15 +178,19 @@ async function generatePrediction(symbol: string, timeframe: string, includeAnal
     }
 
     try {
-        // Get real market data and feed to enhanced feature service
-        const marketData = await derivClient.getLatestTicks(symbol, 100);
+        // Get extensive historical data (6 months to 1 year) for better technical analysis
+        console.log(`📊 Fetching extensive historical data for ${symbol}...`);
+        const historicalData = await derivClient.getHistoricalData(symbol, 12); // 12 months of data
 
-        // Feed market data to enhanced feature service
-        marketData.forEach(tick => featureService!.addTick(tick));
+        console.log(`📊 Retrieved ${historicalData.ticks.length} historical ticks and ${historicalData.candles.length} historical candles`);
+
+        // Feed historical data to enhanced feature service
+        historicalData.ticks.forEach(tick => featureService!.addTick(tick));
+        historicalData.candles.forEach(candle => featureService!.addCandle(candle));
 
         // Generate enhanced features
         const features = featureService!.generateEnhancedFeatures(symbol);
-        const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
+        const currentPrice = historicalData.ticks[ historicalData.ticks.length - 1 ]?.quote || 100;
 
         // Get AI prediction
         const aiPrediction = await geminiService!.generatePrediction(symbol, timeframe, features);
@@ -407,18 +411,24 @@ app.post('/api/predict/autonomous', async (req, res) =>
             throw new Error('Market data not available - system not initialized');
         }
 
-        // Get real market data and feed to enhanced feature service
-        const marketData = await derivClient.getLatestTicks(validatedData.symbol, 100);
+        // Get extensive historical data (6 months to 1 year) for better technical analysis
+        console.log(`📊 Fetching extensive historical data for ${validatedData.symbol}...`);
+        const historicalData = await derivClient.getHistoricalData(validatedData.symbol, 12); // 12 months of data
 
-        // Feed market data to enhanced feature service
-        marketData.forEach(tick => featureService!.addTick(tick));
+        console.log(`📊 Retrieved ${historicalData.ticks.length} historical ticks and ${historicalData.candles.length} historical candles`);
+        console.log(`📈 Sample historical prices:`, historicalData.ticks.slice(-5).map(t => t.quote));
 
-        // Generate candle data for candlestick pattern analysis
-        const candleData = featureService!.generateCandlesFromTicks(marketData, 60); // 1-minute candles
+        // Feed historical data to enhanced feature service
+        historicalData.ticks.forEach(tick => featureService!.addTick(tick));
+        historicalData.candles.forEach(candle => featureService!.addCandle(candle));
+
+        // Use the historical candle data directly for analysis
+        const candleData = historicalData.candles;
+        console.log(`🕯️ Using ${candleData.length} historical candles for analysis`);
 
         // Generate enhanced features
         const features = featureService!.generateEnhancedFeatures(validatedData.symbol);
-        const currentPrice = marketData[ marketData.length - 1 ]?.quote || 100;
+        const currentPrice = historicalData.ticks[ historicalData.ticks.length - 1 ]?.quote || 100;
 
         // Generate autonomous prediction with additional error handling
         console.log(`Starting autonomous prediction for ${validatedData.symbol}/${validatedData.timeframe}...`);

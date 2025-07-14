@@ -1,17 +1,9 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import
-    {
-        DerivTickData,
-        DerivCandleData,
-        DerivWSMessage,
-        DerivSubscription,
-        DerivConnectionState,
-        SyntheticSymbol
-    } from '@/types/deriv.types';
-import { config } from '@/config';
-import { derivLogger, logError, PerformanceTimer } from '@/utils/logger';
+import { DerivTickData, DerivCandleData, DerivSymbol, DerivWSMessage, DerivSubscription, DerivConnectionState, SyntheticSymbol } from '../types/deriv.types';
+import { config } from '../config';
+import { derivLogger, logError, PerformanceTimer } from '../utils/logger';
 
 export class DerivWebSocketService extends EventEmitter
 {

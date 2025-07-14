@@ -1,13 +1,14 @@
 import
-    {
-        MarketFeatures,
-        TechnicalIndicators,
-        TimeFeatures,
-        SyntheticSymbol
-    } from '@/types/prediction.types';
-import { DerivTickData, DerivCandleData } from '@/types/deriv.types';
-import { SUPPORTED_SYMBOLS } from '@/config';
-import { predictionLogger, PerformanceTimer } from '@/utils/logger';
+{
+    MarketFeatures,
+    TechnicalIndicators,
+    TimeFeatures,
+    SyntheticSymbol
+} from '../types/prediction.types';
+import { EnhancedMarketFeatures, EnhancedTechnicalIndicators } from '../types/enhanced-features.types';
+import { DerivTickData, DerivCandleData } from '../types/deriv.types';
+import { SUPPORTED_SYMBOLS } from '../config';
+import { predictionLogger, PerformanceTimer } from '../utils/logger';
 
 export interface CandleBuffer
 {

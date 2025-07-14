@@ -1,9 +1,9 @@
-import { config, SUPPORTED_SYMBOLS } from '@/config';
-import { logger } from '@/utils/logger';
-import { ExpressServer } from '@/services/express-server.service';
-import { DerivWebSocketService } from '@/services/deriv-websocket.service';
-import { FeatureEngineeringService } from '@/services/feature-engineering.service';
-import { GeminiAIService } from '@/services/gemini-ai.service';
+import { config, SUPPORTED_SYMBOLS } from './config';
+import { logger } from './utils/logger';
+import { ExpressServer } from './services/express-server.service';
+import { DerivWebSocketService } from './services/deriv-websocket.service';
+import { FeatureEngineeringService } from './services/feature-engineering.service';
+import { GeminiAIService } from './services/gemini-ai.service';
 
 class PredictionBotApplication
 {

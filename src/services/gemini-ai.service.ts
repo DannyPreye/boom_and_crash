@@ -1,13 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '@/config';
-import { geminiLogger, logError, PerformanceTimer } from '@/utils/logger';
+import { config } from '../config';
+import { geminiLogger, logError, PerformanceTimer } from '../utils/logger';
 import
-    {
-        SyntheticSymbol,
-        PredictionDirection,
-        MarketFeatures,
-        Timeframe
-    } from '@/types/prediction.types';
+{
+    SyntheticSymbol,
+    PredictionDirection,
+    MarketFeatures,
+    Timeframe
+} from '../types/prediction.types';
 
 export interface MarketSentimentAnalysis
 {

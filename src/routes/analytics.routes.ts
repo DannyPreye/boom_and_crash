@@ -1,12 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import
-    {
-        BacktestConfig,
-        BacktestResult,
-        AccuracyStats
-    } from '@/types/analytics.types';
-import { createApiError } from '@/middleware/error-handler';
+{
+    BacktestConfig,
+    BacktestResult,
+    AccuracyStats
+} from '../types/analytics.types';
+import { createApiError } from '../middleware/error-handler';
 
 const router = Router();
 

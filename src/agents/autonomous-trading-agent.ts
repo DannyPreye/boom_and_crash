@@ -156,7 +156,7 @@ Analyze ALL the data above and provide your professional trading decision in thi
 {
   "prediction": "UP" or "DOWN",
   "confidence": 0.65,
-  "reasoning": "Detailed multi-sentence explanation of your complete analysis covering: technical indicators interpretation, multi-timeframe alignment, key support/resistance levels, symbol-specific factors, and why you chose this direction",
+  "reasoning": "Clear explanation of why you chose UP/DOWN, highlighting the strongest supporting factors and addressing any conflicting signals",
   "entry_price": ${currentPrice},
   "stop_loss": calculate based on symbol volatility and risk rules above,
   "take_profit": calculate based on 1.5-3x risk reward,
@@ -369,39 +369,29 @@ ${features.ticks_since_last_spike ? `• Ticks Since Last Crash: ${features.tick
 
         return '';
     }
-    position_size_suggestion: jsonData.position_size || 0.02,
-        max_risk_per_trade: jsonData.max_risk || 0.015,
-            probability_of_success: jsonData.success_probability || jsonData.confidence || 0.65,
-                },
-// Multi-timeframe analysis fields
-multi_timeframe_analysis: jsonData.multi_timeframe_analysis || "Multi-timeframe analysis completed",
-    higher_timeframe_trend: jsonData.higher_timeframe_trend || multiTimeframeData.higher_timeframe.trend,
-        intermediate_timeframe_momentum: jsonData.intermediate_timeframe_momentum || multiTimeframeData.intermediate_timeframe.trend,
-            timeframe_confluence: jsonData.timeframe_confluence || (multiTimeframeData.confluence.aligned ? 'STRONG' : 'WEAK'),
-                market_structure_quality: jsonData.market_structure_quality || (multiTimeframeData.confluence.score > 0.7 ? 'HIGH' : 'MEDIUM'),
-                    confluence_bonus: jsonData.confluence_bonus || multiTimeframeData.confluence.score,
-                        // Legacy fields for backward compatibility
-                        analysis: jsonData.multi_timeframe_analysis || "Multi-timeframe analysis performed",
-                            reasoning: jsonData.reasoning || "Analysis based on multi-timeframe structure",
-                                factors: {
-    technical: jsonData.technical_score || 0.7,
-        sentiment: jsonData.sentiment_score || 0.0,
-            pattern: jsonData.pattern_score || 0.7,
-                confluence: jsonData.confluence_bonus || multiTimeframeData.confluence.score,
-                    key_factors: jsonData.key_factors || [ "Multi-timeframe analysis", "Market structure", "Confluence score" ],
-                    ...(symbol.includes('BOOM') || symbol.includes('CRASH')
-        ? { spike_proximity: marketFeatures.spike_probability || 0 }
-        : { volatility_momentum: marketFeatures.volatility_momentum }
-    ),
-                }
-            };
 
-// Validate the result
-this.validateResult(result);
+    /**
+     * Test the LLM connection and basic functionality
+     */
+    async testConnection(): Promise<boolean>
+    {
+        try {
+            const testResponse = await this.llm.invoke([
+                new HumanMessage("Respond with just: OK")
+            ]);
 
-return result;
-
+            if (testResponse && testResponse.content) {
+                console.log('LLM test successful:', testResponse.content);
+                return true;
+            }
+            return false;
         } catch (error) {
+            console.error('LLM test failed:', error);
+            return false;
+        }
+    }
+
+} catch (error) {
     console.error('Autonomous prediction failed:', error);
 
     // Fallback to a basic prediction if AI fails

@@ -1,3 +1,4 @@
+import { MLPredictorService } from './../services/ml-predictor.service';
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage } from '@langchain/core/messages';
 import { EnhancedMarketFeatures } from '../types/enhanced-features.types';
@@ -6,7 +7,7 @@ import { AdvancedTechnicalAnalysis } from '../services/advanced-technical-analys
 import { MultiTimeframeAnalysis } from '../services/multi-timeframe-analysis.service';
 import { PatternRecognitionService } from '../services/pattern-recognition.service';
 import { VolumeAnalysisService } from '../services/volume-analysis.service';
-import { MachineLearningPredictor } from '../services/ml-predictor.service';
+// import { MLPredictorService } from '../services/ml-predictor.service';
 
 /**
  * Advanced Trading Agent - Phase 2 Implementation
@@ -20,13 +21,13 @@ export class AdvancedTradingAgent
     private multiTimeframe: MultiTimeframeAnalysis;
     private patternRecognition: PatternRecognitionService;
     private volumeAnalysis: VolumeAnalysisService;
-    private mlPredictor: MachineLearningPredictor;
+    private mlPredictor: MLPredictorService;
 
     constructor (apiKey: string)
     {
         this.llm = new ChatAnthropic({
             apiKey,
-            model: 'claude-3-5-sonnet-20241022',
+            model: 'claude-sonnet-4-20250514',
             temperature: 0.05, // Lower temperature for more consistent analysis
             maxTokens: 3000,
         });
@@ -35,7 +36,7 @@ export class AdvancedTradingAgent
         this.multiTimeframe = new MultiTimeframeAnalysis();
         this.patternRecognition = new PatternRecognitionService();
         this.volumeAnalysis = new VolumeAnalysisService();
-        this.mlPredictor = new MachineLearningPredictor();
+        this.mlPredictor = new MLPredictorService(apiKey);
     }
 
     /**
@@ -77,10 +78,26 @@ export class AdvancedTradingAgent
             );
 
             // Phase 5: Machine Learning Prediction
-            const mlPrediction = await this.mlPredictor.generatePrediction(
-                historicalData,
-                enhancedFeatures,
-                advancedIndicators
+            // Convert enhanced features technical indicators to the format expected by ML predictor
+            const technicalIndicatorsForML = {
+                rsi: enhancedFeatures.technical_indicators.rsi,
+                macd_signal: enhancedFeatures.technical_indicators.macd_signal,
+                bollinger_position: enhancedFeatures.technical_indicators.bollinger_position,
+                ema_short: enhancedFeatures.technical_indicators.rsi, // Use RSI as proxy for EMA short
+                ema_long: enhancedFeatures.technical_indicators.stoch_rsi, // Use Stochastic RSI as proxy for EMA long
+                adx: enhancedFeatures.technical_indicators.atr_normalized * 100, // Convert ATR normalized to ADX-like scale
+                stochastic: enhancedFeatures.technical_indicators.stochastic,
+                williams_r: enhancedFeatures.technical_indicators.williams_r
+            };
+
+            const mlPrediction = await this.mlPredictor.predictNextTick(
+                {
+                    currentPrice,
+                    priceHistory: historicalData.map((d: any) => d.close)
+                },
+                technicalIndicatorsForML,
+                patterns,
+                volumeAnalysis
             );
 
             // Phase 6: Generate comprehensive prompt
@@ -114,7 +131,7 @@ export class AdvancedTradingAgent
             const content = response.content as string;
             console.log('📊 Advanced analysis completed, parsing response...');
             console.log('📝 Response content length:', content.length);
-            console.log('📝 Response content preview:', content.substring(0, 500));
+
 
             // Extract JSON from response with multiple fallback methods
             let jsonData: any = null;
@@ -195,7 +212,7 @@ export class AdvancedTradingAgent
                 };
             }
 
-            console.log('✅ Successfully parsed JSON data:', jsonData);
+
 
             // Validate and sanitize the JSON data
             jsonData = this.validateAndSanitizeJsonData(jsonData, currentPrice);
@@ -242,68 +259,81 @@ export class AdvancedTradingAgent
         const indicators = features.technical_indicators;
         const regime = features.market_regime;
 
+        // Handle mlPrediction structure - it's an AutonomousPredictionResult from MLPredictorService
+        const mlDirection = mlPrediction?.prediction || 'NEUTRAL';
+        const mlConfidence = mlPrediction?.confidence || 0.5;
+        const mlReasoning = mlPrediction?.reasoning || 'No ML reasoning available';
+
+        // Safe property access with fallbacks
+        const ichimoku = advancedIndicators?.ichimoku || {};
+        const fibonacci = advancedIndicators?.fibonacci || {};
+        const elliottWave = advancedIndicators?.elliottWave || {};
+        const momentum = advancedIndicators?.momentum || {};
+        const timeframes = multiTimeframeAnalysis?.timeframes || {};
+        const candlestick = patterns?.candlestick || {};
+        const chart = patterns?.chart || {};
+
         return `You are an expert quantitative trading analyst with 20+ years of experience in technical analysis, algorithmic trading, and risk management. Your task is to analyze the provided market data and generate a comprehensive trading recommendation.
 
 ## CONTEXT
 - Symbol: ${symbol}
 - Timeframe: ${timeframe}
 - Current Price: ${currentPrice.toFixed(4)}
-- Market Regime: ${regime.overall_regime} (${regime.volatility_state} volatility, ${regime.trend_state} trend, ${regime.momentum_state} momentum)
+- Market Regime: ${regime?.overall_regime || 'UNKNOWN'} (${regime?.volatility_state || 'UNKNOWN'} volatility, ${regime?.trend_state || 'UNKNOWN'} trend, ${regime?.momentum_state || 'UNKNOWN'} momentum)
 
 ## TECHNICAL ANALYSIS DATA
 
 ### Advanced Indicators
 **Ichimoku Cloud:**
-- Tenkan-sen: ${advancedIndicators.ichimoku.tenkan.toFixed(4)}
-- Kijun-sen: ${advancedIndicators.ichimoku.kijun.toFixed(4)}
-- Cloud Position: ${advancedIndicators.ichimoku.cloudPosition}
-- Cloud Strength: ${(advancedIndicators.ichimoku.cloudStrength * 100).toFixed(1)}%
+- Tenkan-sen: ${ichimoku.tenkan?.toFixed(4) || 'N/A'}
+- Kijun-sen: ${ichimoku.kijun?.toFixed(4) || 'N/A'}
+- Cloud Position: ${ichimoku.cloudPosition || 'UNKNOWN'}
+- Cloud Strength: ${ichimoku.cloudStrength ? (ichimoku.cloudStrength * 100).toFixed(1) : 'N/A'}%
 
 **Fibonacci Retracements:**
-- Current Position: ${advancedIndicators.fibonacci.currentPosition}
-- Next Support: ${advancedIndicators.fibonacci.nextSupport.toFixed(4)}
-- Next Resistance: ${advancedIndicators.fibonacci.nextResistance.toFixed(4)}
+- Current Position: ${fibonacci.currentPosition || 'UNKNOWN'}
+- Next Support: ${fibonacci.nextSupport?.toFixed(4) || 'N/A'}
+- Next Resistance: ${fibonacci.nextResistance?.toFixed(4) || 'N/A'}
 
 **Elliott Wave:**
-- Wave Count: ${advancedIndicators.elliottWave.waveCount}
-- Current Wave: ${advancedIndicators.elliottWave.currentWave}
-- Trend Direction: ${advancedIndicators.elliottWave.trendDirection}
-- Wave Strength: ${(advancedIndicators.elliottWave.waveStrength * 100).toFixed(1)}%
+- Wave Count: ${elliottWave.waveCount || 'UNKNOWN'}
+- Current Wave: ${elliottWave.currentWave || 'UNKNOWN'}
+- Trend Direction: ${elliottWave.trendDirection || 'UNKNOWN'}
+- Wave Strength: ${elliottWave.waveStrength ? (elliottWave.waveStrength * 100).toFixed(1) : 'N/A'}%
 
 **Momentum Indicators:**
-- CCI: ${advancedIndicators.momentum.cci.toFixed(2)}
-- ROC: ${advancedIndicators.momentum.roc.toFixed(2)}%
-- MFI: ${advancedIndicators.momentum.mfi.toFixed(2)}
-- ADX: ${advancedIndicators.momentum.adx.toFixed(2)}
+- CCI: ${momentum.cci?.toFixed(2) || 'N/A'}
+- ROC: ${momentum.roc?.toFixed(2) || 'N/A'}%
+- MFI: ${momentum.mfi?.toFixed(2) || 'N/A'}
+- ADX: ${momentum.adx?.toFixed(2) || 'N/A'}
 
 ### Multi-Timeframe Analysis
-- 1m: ${multiTimeframeAnalysis.timeframes.m1.trend} (${(multiTimeframeAnalysis.timeframes.m1.strength * 100).toFixed(1)}%)
-- 5m: ${multiTimeframeAnalysis.timeframes.m5.trend} (${(multiTimeframeAnalysis.timeframes.m5.strength * 100).toFixed(1)}%)
-- 15m: ${multiTimeframeAnalysis.timeframes.m15.trend} (${(multiTimeframeAnalysis.timeframes.m15.strength * 100).toFixed(1)}%)
-- 1h: ${multiTimeframeAnalysis.timeframes.h1.trend} (${(multiTimeframeAnalysis.timeframes.h1.strength * 100).toFixed(1)}%)
-- Overall Confluence: ${(multiTimeframeAnalysis.overallConfluence * 100).toFixed(1)}%
+- 1m: ${timeframes.m1?.trend || 'UNKNOWN'} (${timeframes.m1?.strength ? (timeframes.m1.strength * 100).toFixed(1) : 'N/A'}%)
+- 5m: ${timeframes.m5?.trend || 'UNKNOWN'} (${timeframes.m5?.strength ? (timeframes.m5.strength * 100).toFixed(1) : 'N/A'}%)
+- 15m: ${timeframes.m15?.trend || 'UNKNOWN'} (${timeframes.m15?.strength ? (timeframes.m15.strength * 100).toFixed(1) : 'N/A'}%)
+- 1h: ${timeframes.h1?.trend || 'UNKNOWN'} (${timeframes.h1?.strength ? (timeframes.h1.strength * 100).toFixed(1) : 'N/A'}%)
+- Overall Confluence: ${multiTimeframeAnalysis?.overallConfluence ? (multiTimeframeAnalysis.overallConfluence * 100).toFixed(1) : 'N/A'}%
 
 ### Pattern Recognition
-**Candlestick Pattern:** ${patterns.candlestick.primaryPattern ? patterns.candlestick.primaryPattern.name : 'None detected'} (${(patterns.candlestick.reliability * 100).toFixed(1)}% reliability)
-**Chart Pattern:** ${patterns.chart.primaryPattern ? patterns.chart.primaryPattern.name : 'None detected'} (${(patterns.chart.completion * 100).toFixed(1)}% completion)
+**Candlestick Pattern:** ${candlestick.primaryPattern?.name || 'None detected'} (${candlestick.reliability ? (candlestick.reliability * 100).toFixed(1) : 'N/A'}% reliability)
+**Chart Pattern:** ${chart.primaryPattern?.name || 'None detected'} (${chart.completion ? (chart.completion * 100).toFixed(1) : 'N/A'}% completion)
 
 ### Volume Analysis
-- Volume Ratio: ${volumeAnalysis.volumeRatio.toFixed(2)}x average
-- VWAP: ${volumeAnalysis.vwap.toFixed(4)}
-- Price vs VWAP: ${volumeAnalysis.priceVsVwap > 0 ? '+' : ''}${(volumeAnalysis.priceVsVwap * 100).toFixed(2)}%
-- Volume Signal: ${volumeAnalysis.volumeSignal}
+- Volume Ratio: ${volumeAnalysis?.volumeRatio?.toFixed(2) || 'N/A'}x average
+- VWAP: ${volumeAnalysis?.vwap?.toFixed(4) || 'N/A'}
+- Price vs VWAP: ${volumeAnalysis?.priceVsVwap ? (volumeAnalysis.priceVsVwap > 0 ? '+' : '') + (volumeAnalysis.priceVsVwap * 100).toFixed(2) : 'N/A'}%
+- Volume Signal: ${volumeAnalysis?.volumeSignal || 'UNKNOWN'}
 
 ### Machine Learning Consensus
-- Ensemble Prediction: ${mlPrediction.ensemble.prediction}
-- Model Confidence: ${(mlPrediction.ensemble.confidence * 100).toFixed(1)}%
-- Model Agreement: ${(mlPrediction.ensemble.agreement * 100).toFixed(1)}%
-- Top Features: ${mlPrediction.featureImportance.slice(0, 3).join(', ')}
+- ML Prediction: ${mlDirection}
+- ML Confidence: ${(mlConfidence * 100).toFixed(1)}%
+- ML Reasoning: ${mlReasoning}
 
 ### Core Indicators
-- RSI: ${indicators.rsi.toFixed(2)} ${this.getRSISignal(indicators.rsi)}
-- MACD Histogram: ${indicators.macd_histogram.toFixed(4)} ${this.getMACDMomentum(indicators.macd_histogram)}
-- Stochastic: ${indicators.stochastic.toFixed(2)}
-- ATR: ${indicators.atr.toFixed(4)} (${(indicators.atr_normalized * 100).toFixed(1)}% normalized)
+- RSI: ${indicators.rsi?.toFixed(2) || 'N/A'} ${this.getRSISignal(indicators.rsi || 50)}
+- MACD Histogram: ${indicators.macd_histogram?.toFixed(4) || 'N/A'} ${this.getMACDMomentum(indicators.macd_histogram || 0)}
+- Stochastic: ${indicators.stochastic?.toFixed(2) || 'N/A'}
+- ATR: ${indicators.atr?.toFixed(4) || 'N/A'} (${indicators.atr_normalized ? (indicators.atr_normalized * 100).toFixed(1) : 'N/A'}% normalized)
 
 ## ANALYSIS REQUIREMENTS
 
@@ -335,7 +365,7 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
   "ml_integration": "How ML predictions align with technical analysis",
   "prediction": "UP",
   "confidence": 0.85,
-  "reasoning": "Clear, comprehensive explanation of the trading decision",
+  "reasoning": "Clear explanation of why you chose UP/DOWN, highlighting the strongest supporting factors and addressing any conflicting signals",
   "key_factors": ["Factor 1", "Factor 2", "Factor 3"],
   "entry_price": ${currentPrice},
   "stop_loss": ${this.calculateAdvancedStopLoss(currentPrice, advancedIndicators, patterns)},
@@ -344,14 +374,14 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
   "immediate_target": ${(currentPrice * 1.008).toFixed(4)},
   "short_term_target": ${(currentPrice * 1.015).toFixed(4)},
   "medium_term_target": ${(currentPrice * 1.025).toFixed(4)},
-  "position_size": ${this.calculateAdvancedPositionSize(regime.confluence_score, multiTimeframeAnalysis.overallConfluence, mlPrediction.ensemble.confidence)},
-  "technical_score": ${Math.min(0.98, regime.confluence_score + multiTimeframeAnalysis.overallConfluence * 0.3)},
+  "position_size": ${this.calculateAdvancedPositionSize(regime?.confluence_score || 0.5, multiTimeframeAnalysis?.overallConfluence || 0.5, mlConfidence)},
+  "technical_score": ${Math.min(0.98, (regime?.confluence_score || 0.5) + (multiTimeframeAnalysis?.overallConfluence || 0.5) * 0.3)},
   "advanced_score": ${this.calculateAdvancedScore(advancedIndicators, multiTimeframeAnalysis, patterns, volumeAnalysis, mlPrediction)},
   "risk_assessment": {
-    "volatility_risk": "${advancedIndicators.ichimoku.cloudStrength > 0.7 ? 'LOW' : 'HIGH'}",
-    "pattern_reliability": "${patterns.candlestick.reliability > 0.8 ? 'HIGH' : 'MEDIUM'}",
-    "volume_support": "${volumeAnalysis.volumeRatio > 1.5 ? 'STRONG' : 'WEAK'}",
-    "ml_confidence": "${mlPrediction.ensemble.confidence > 0.8 ? 'HIGH' : 'MEDIUM'}"
+    "volatility_risk": "${ichimoku.cloudStrength > 0.7 ? 'LOW' : 'HIGH'}",
+    "pattern_reliability": "${candlestick.reliability > 0.8 ? 'HIGH' : 'MEDIUM'}",
+    "volume_support": "${volumeAnalysis?.volumeRatio > 1.5 ? 'STRONG' : 'WEAK'}",
+    "ml_confidence": "${mlConfidence > 0.8 ? 'HIGH' : 'MEDIUM'}"
   }
 }
 \`\`\`
@@ -363,12 +393,21 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
 4. **NO EXTRA TEXT**: Do not include any text before or after the JSON block
 5. **EXACT FORMAT**: Follow the exact structure and field names provided
 
+## REASONING REQUIREMENTS
+- Your reasoning MUST clearly explain why you chose UP or DOWN
+- If predicting UP: Explain bullish factors and why they outweigh bearish signals
+- If predicting DOWN: Explain bearish factors and why they outweigh bullish signals
+- Acknowledge conflicting signals but explain why your chosen direction is stronger
+- Be specific about which indicators, patterns, or timeframes support your decision
+- Avoid contradictions between your reasoning and prediction direction
+
 ## IMPORTANT NOTES
 - Base your decision on the strongest confluence of indicators
 - Consider market regime context in your analysis
 - Provide specific reasoning for your confidence level
 - Ensure risk-reward ratios are appropriate for the market conditions
-- Be conservative when indicators show mixed signals`;
+- Be conservative when indicators show mixed signals
+- ALWAYS ensure your reasoning directly supports your prediction direction`;
     }
 
     /**
@@ -441,7 +480,7 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
         const timeframeScore = multiTimeframeAnalysis?.overallConfluence || 0.5;
         const patternScore = patterns?.candlestick?.reliability || 0.5;
         const volumeScore = Math.min(1, (volumeAnalysis?.volumeRatio || 1) / 2);
-        const mlScore = mlPrediction?.ensemble?.confidence || 0.5;
+        const mlScore = mlPrediction?.confidence || 0.5; // Use confidence from AutonomousPredictionResult
 
         return (ichimokuScore + fibonacciScore + elliottScore + timeframeScore + patternScore + volumeScore + mlScore) / 7;
     }
@@ -542,7 +581,7 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
                 elliott_wave: advancedIndicators?.elliottWave?.waveStrength || 0.5,
                 pattern_reliability: patterns?.candlestick?.reliability || 0.5,
                 volume_support: Math.min(1, (volumeAnalysis?.volumeRatio || 1) / 2),
-                ml_confidence: mlPrediction?.ensemble?.confidence || 0.5,
+                ml_confidence: mlPrediction?.confidence || 0.5,
             },
         };
     }
@@ -655,7 +694,7 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
                         jsonData[ field ] = 0.75; // Default to 75%
                         break;
                     case 'reasoning':
-                        jsonData[ field ] = 'Fallback reasoning due to missing field.';
+                        jsonData[ field ] = `Fallback reasoning: Prediction is ${jsonData.prediction || 'UP'} based on basic technical analysis.`;
                         break;
                     case 'entry_price':
                         jsonData[ field ] = currentPrice;
@@ -755,6 +794,37 @@ Provide your analysis in the following JSON format. IMPORTANT: Ensure the JSON i
             jsonData.ml_integration = 'Fallback ML integration due to missing field.';
         }
 
+        // Validate reasoning alignment with prediction
+        this.validateReasoningAlignment(jsonData);
+
         return jsonData;
+    }
+
+    /**
+     * Validates that the reasoning aligns with the prediction direction
+     */
+    private validateReasoningAlignment(jsonData: any): void
+    {
+        if (!jsonData.reasoning || !jsonData.prediction) {
+            return;
+        }
+
+        const reasoning = jsonData.reasoning.toLowerCase();
+        const prediction = jsonData.prediction.toUpperCase();
+
+        // Check for contradictions
+        const hasBullishTerms = reasoning.includes('bull') || reasoning.includes('up') || reasoning.includes('long') || reasoning.includes('buy');
+        const hasBearishTerms = reasoning.includes('bear') || reasoning.includes('down') || reasoning.includes('short') || reasoning.includes('sell');
+
+        if (prediction === 'UP' && hasBearishTerms && !hasBullishTerms) {
+            console.warn('⚠️ Warning: UP prediction but reasoning contains bearish terms without bullish justification');
+        } else if (prediction === 'DOWN' && hasBullishTerms && !hasBearishTerms) {
+            console.warn('⚠️ Warning: DOWN prediction but reasoning contains bullish terms without bearish justification');
+        }
+
+        // Ensure reasoning mentions the prediction direction
+        if (!reasoning.includes(prediction.toLowerCase())) {
+            console.warn(`⚠️ Warning: Reasoning does not clearly mention the prediction direction (${prediction})`);
+        }
     }
 }
