@@ -7,6 +7,10 @@ import
     AccuracyStats
 } from '../types/analytics.types';
 import { createApiError } from '../middleware/error-handler';
+import { BacktestService } from '../services/backtest.service';
+import { DerivWebSocketClient } from '../services/deriv-client';
+import { EnhancedFeatureEngineeringService } from '../services/enhanced-feature-engineering.service';
+import { AdvancedTradingAgent } from '../agents/advanced-trading-agent';
 
 const router = Router();
 
@@ -29,24 +33,82 @@ router.get('/accuracy', async (req: Request, res: Response, next: NextFunction) 
     try {
         const { symbol, timeframe, period = '24h' } = req.query;
 
-        // TODO: Implement actual accuracy calculation
-        const mockStats: AccuracyStats = {
+        // Initialize services for accuracy calculation
+        const derivApiUrl = process.env.DERIV_API_URL || 'wss://ws.derivws.com/websockets/v3';
+        const derivApiToken = process.env.DERIV_API_TOKEN || 'demo-token';
+        const derivAppId = process.env.DERIV_APP_ID || '1089';
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY || 'demo-key';
+
+        const derivClient = new DerivWebSocketClient(derivApiUrl, derivApiToken, derivAppId);
+        const featureService = new EnhancedFeatureEngineeringService();
+        const tradingAgent = new AdvancedTradingAgent(anthropicApiKey);
+        const backtestService = new BacktestService(derivClient, featureService, tradingAgent);
+
+        // Calculate period dates
+        const endDate = new Date().toISOString().split('T')[ 0 ];
+        let startDate: string;
+
+        switch (period) {
+            case '24h':
+                startDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[ 0 ];
+                break;
+            case '7d':
+                startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[ 0 ];
+                break;
+            case '30d':
+                startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[ 0 ];
+                break;
+            default:
+                startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[ 0 ];
+        }
+
+        // Run a quick backtest to get accuracy stats
+        const config: BacktestConfig = {
+            symbol: (symbol as string) || 'BOOM1000',
+            timeframe: (timeframe as string) || '5m',
+            start_date: startDate,
+            end_date: endDate,
+            initial_balance: 10000,
+            risk_per_trade: 0.02,
+            min_confidence_threshold: 0.6,
+        };
+
+        const backtestResult = await backtestService.runBacktest(config);
+
+        // Calculate confidence distribution
+        const confidenceRanges = [
+            { min: 0.9, max: 1.0, label: '0.9-1.0' },
+            { min: 0.8, max: 0.9, label: '0.8-0.9' },
+            { min: 0.7, max: 0.8, label: '0.7-0.8' },
+            { min: 0.6, max: 0.7, label: '0.6-0.7' },
+        ];
+
+        const confidenceDistribution = confidenceRanges.map(range =>
+        {
+            const tradesInRange = backtestResult.trades.filter(t =>
+                t.confidence >= range.min && t.confidence < range.max
+            );
+            const correctTrades = tradesInRange.filter(t => t.was_correct);
+
+            return {
+                confidence_range: range.label,
+                count: tradesInRange.length,
+                accuracy: tradesInRange.length > 0 ? (correctTrades.length / tradesInRange.length) * 100 : 0,
+            };
+        });
+
+        const accuracyStats: AccuracyStats = {
             symbol: (symbol as string) || 'ALL',
             timeframe: (timeframe as string) || 'ALL',
             period: period as any,
-            total_predictions: 150,
-            correct_predictions: 127,
-            accuracy_percentage: 84.67,
-            confidence_distribution: [
-                { confidence_range: '0.9-1.0', count: 45, accuracy: 91.1 },
-                { confidence_range: '0.8-0.9', count: 67, accuracy: 85.1 },
-                { confidence_range: '0.7-0.8', count: 32, accuracy: 78.1 },
-                { confidence_range: '0.6-0.7', count: 6, accuracy: 66.7 },
-            ],
+            total_predictions: backtestResult.total_trades,
+            correct_predictions: backtestResult.trades.filter(t => t.was_correct).length,
+            accuracy_percentage: backtestResult.performance_metrics.accuracy,
+            confidence_distribution: confidenceDistribution,
             last_updated: new Date().toISOString(),
         };
 
-        res.json(mockStats);
+        res.json(accuracyStats);
     } catch (error) {
         next(error);
     }
@@ -61,36 +123,23 @@ router.post('/backtest', async (req: Request, res: Response, next: NextFunction)
         // Validate request
         const config = backtestConfigSchema.parse(req.body);
 
-        // TODO: Implement actual backtesting
-        const mockResult: BacktestResult = {
-            config,
-            total_trades: 50,
-            winning_trades: 42,
-            losing_trades: 8,
-            win_rate: 84.0,
-            total_pnl: 245.50,
-            max_drawdown: -12.30,
-            sharpe_ratio: 1.85,
-            profit_factor: 3.2,
-            avg_trade_duration: 15.5,
-            trades: [], // Would contain individual trade data
-            performance_metrics: {
-                accuracy: 84.0,
-                precision: 85.7,
-                recall: 81.2,
-                f1_score: 83.4,
-                confusion_matrix: {
-                    true_positive: 35,
-                    true_negative: 7,
-                    false_positive: 6,
-                    false_negative: 2,
-                },
-                daily_returns: [], // Would contain daily performance
-                monthly_summary: [], // Would contain monthly breakdown
-            },
-        };
+        // Initialize services for backtesting
+        const derivApiUrl = process.env.DERIV_API_URL || 'wss://ws.derivws.com/websockets/v3';
+        const derivApiToken = process.env.DERIV_API_TOKEN || 'demo-token';
+        const derivAppId = process.env.DERIV_APP_ID || '1089';
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY || 'demo-key';
 
-        res.json(mockResult);
+        const derivClient = new DerivWebSocketClient(derivApiUrl, derivApiToken, derivAppId);
+        const featureService = new EnhancedFeatureEngineeringService();
+        const tradingAgent = new AdvancedTradingAgent(anthropicApiKey);
+
+        // Initialize backtest service
+        const backtestService = new BacktestService(derivClient, featureService, tradingAgent);
+
+        // Run the backtest
+        const result = await backtestService.runBacktest(config);
+
+        res.json(result);
     } catch (error) {
         if (error instanceof z.ZodError) {
             next(createApiError('Invalid backtest configuration', 400, 'VALIDATION_ERROR', error.errors));

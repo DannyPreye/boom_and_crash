@@ -54,6 +54,16 @@ export class EnhancedFeatureEngineeringService
     }
 
     /**
+     * Clear all data buffers for backtesting
+     */
+    clearData(): void
+    {
+        this.tickBuffers.clear();
+        this.candleBuffers.clear();
+        this.spikeTracking.clear();
+    }
+
+    /**
      * Generate enhanced market features for a symbol
      */
     generateEnhancedFeatures(symbol: string, intervalSeconds: number = 60): EnhancedMarketFeatures

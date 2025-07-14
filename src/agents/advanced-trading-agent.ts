@@ -214,6 +214,24 @@ export class AdvancedTradingAgent
 
 
 
+            // Handle different response formats from LLM
+            if (jsonData.direction && !jsonData.prediction) {
+                jsonData.prediction = jsonData.direction;
+            }
+
+            // Ensure we have a valid prediction
+            if (!jsonData.prediction || jsonData.prediction === 'NEUTRAL') {
+                // Convert NEUTRAL to UP or DOWN based on technical indicators
+                const indicators = enhancedFeatures.technical_indicators;
+                if (indicators.rsi < 50 && indicators.macd_histogram > 0) {
+                    jsonData.prediction = 'UP';
+                } else if (indicators.rsi > 50 && indicators.macd_histogram < 0) {
+                    jsonData.prediction = 'DOWN';
+                } else {
+                    jsonData.prediction = 'UP'; // Default to UP
+                }
+            }
+
             // Validate and sanitize the JSON data
             jsonData = this.validateAndSanitizeJsonData(jsonData, currentPrice);
 
