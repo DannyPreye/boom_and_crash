@@ -41,7 +41,8 @@ export class MLPredictorService
         marketData: { currentPrice: number; priceHistory: number[]; },
         technicalIndicators: TechnicalIndicators,
         patterns: any,
-        volumeAnalysis: any
+        volumeAnalysis: any,
+        timeframe: string = '5m'
     ): Promise<AutonomousPredictionResult>
     {
         try {
@@ -64,7 +65,8 @@ export class MLPredictorService
                 marketData,
                 technicalIndicators,
                 patterns,
-                volumeAnalysis
+                volumeAnalysis,
+                timeframe
             );
 
             // Get statistical fallback prediction
@@ -77,7 +79,8 @@ export class MLPredictorService
             const finalPrediction = this.combinePredictions(
                 llmPrediction,
                 statisticalPrediction,
-                marketData.currentPrice
+                marketData.currentPrice,
+                technicalIndicators // Pass technical indicators for validation
             );
 
             logger.info('LLM prediction completed', {
@@ -105,21 +108,23 @@ export class MLPredictorService
         marketData: { currentPrice: number; priceHistory: number[]; },
         technicalIndicators: TechnicalIndicators,
         patterns: any,
-        volumeAnalysis: any
+        volumeAnalysis: any,
+        timeframe: string
     ): Promise<LLMPrediction>
     {
         const prompt = this.buildAnalysisPrompt(
             marketData,
             technicalIndicators,
             patterns,
-            volumeAnalysis
+            volumeAnalysis,
+            timeframe
         );
 
         try {
             const response = await this.llm.invoke([ new HumanMessage(prompt) ]);
             const content = response.content as string;
 
-            return this.parseLLMResponse(content);
+            return this.parseLLMResponse(content, timeframe);
         } catch (error) {
             logger.error('LLM API error', { error });
             throw new Error(`LLM API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -130,7 +135,8 @@ export class MLPredictorService
         marketData: { currentPrice: number; priceHistory: number[]; },
         technicalIndicators: TechnicalIndicators,
         patterns: any,
-        volumeAnalysis: any
+        volumeAnalysis: any,
+        timeframe: string
     ): string
     {
         const currentPrice = marketData.currentPrice;
@@ -138,12 +144,12 @@ export class MLPredictorService
 
         // Fix: Add null checks for priceHistory
         if (priceHistory.length === 0) {
-            return this.buildFallbackPrompt(currentPrice, technicalIndicators);
+            return this.buildFallbackPrompt(currentPrice, technicalIndicators, timeframe);
         }
 
         const firstPrice = priceHistory[ 0 ];
         if (firstPrice === undefined || firstPrice === 0) {
-            return this.buildFallbackPrompt(currentPrice, technicalIndicators);
+            return this.buildFallbackPrompt(currentPrice, technicalIndicators, timeframe);
         }
 
         const priceChange = ((currentPrice - firstPrice) / firstPrice) * 100;
@@ -154,6 +160,7 @@ Analyze the following market data for binary options trading and provide your pr
 
 CURRENT MARKET DATA:
 - Current Price: ${currentPrice}
+- Timeframe: ${timeframe}
 - Price Change (last 20 ticks): ${priceChange.toFixed(2)}%
 - Recent Price Trend: ${this.getPriceTrend(priceHistory)}
 
@@ -186,7 +193,7 @@ RESPONSE FORMAT (valid JSON only):
   "direction": "UP|DOWN|NEUTRAL",
   "confidence": 0.0-1.0,
   "reasoning": "Detailed analysis explanation",
-  "timeframe": "1m|5m|15m",
+  "timeframe": "1m|5m|15m|30m|1h",
   "risk_level": "LOW|MEDIUM|HIGH",
   "entry_price": number (optional),
   "stop_loss": number (optional),
@@ -196,12 +203,13 @@ RESPONSE FORMAT (valid JSON only):
 Provide only the JSON response, no additional text.`;
     }
 
-    private buildFallbackPrompt(currentPrice: number, technicalIndicators: TechnicalIndicators): string
+    private buildFallbackPrompt(currentPrice: number, technicalIndicators: TechnicalIndicators, timeframe: string): string
     {
         return `You are a professional financial analyst specializing in binary options trading. Provide precise, data-driven analysis in valid JSON format only.
 
 CURRENT MARKET DATA:
 - Current Price: ${currentPrice}
+- Timeframe: ${timeframe}
 - Price Change: Insufficient data
 - Recent Price Trend: Insufficient data
 
@@ -231,7 +239,7 @@ RESPONSE FORMAT (valid JSON only):
   "direction": "UP|DOWN|NEUTRAL",
   "confidence": 0.0-1.0,
   "reasoning": "Detailed analysis explanation",
-  "timeframe": "1m|5m|15m",
+  "timeframe": "1m|5m|15m|30m|1h",
   "risk_level": "LOW|MEDIUM|HIGH",
   "entry_price": number (optional),
   "stop_loss": number (optional),
@@ -297,7 +305,7 @@ Provide only the JSON response, no additional text.`;
         return 'Sideways';
     }
 
-    private parseLLMResponse(content: string): LLMPrediction
+    private parseLLMResponse(content: string, timeframe: string): LLMPrediction
     {
         // Try multiple parsing approaches
         let parsed: any = null;
@@ -352,20 +360,20 @@ Provide only the JSON response, no additional text.`;
         }
 
         // Validate and provide fallbacks
-        return this.validateAndSanitizePrediction(parsed);
+        return this.validateAndSanitizePrediction(parsed, timeframe);
     }
 
-    private validateAndSanitizePrediction(parsed: any): LLMPrediction
+    private validateAndSanitizePrediction(parsed: any, timeframe: string): LLMPrediction
     {
         const validDirections = [ 'UP', 'DOWN', 'NEUTRAL' ];
         const validRiskLevels = [ 'LOW', 'MEDIUM', 'HIGH' ];
-        const validTimeframes = [ '1m', '5m', '15m' ];
+        const validTimeframes = [ '1m', '5m', '15m', '30m', '1h' ];
 
         return {
             direction: validDirections.includes(parsed.direction) ? parsed.direction : 'NEUTRAL',
             confidence: this.clampNumber(parsed.confidence, 0, 1, 0.5),
             reasoning: parsed.reasoning || 'No reasoning provided',
-            timeframe: validTimeframes.includes(parsed.timeframe) ? parsed.timeframe : '1m',
+            timeframe: validTimeframes.includes(parsed.timeframe) ? parsed.timeframe : timeframe,
             risk_level: validRiskLevels.includes(parsed.risk_level) ? parsed.risk_level : 'MEDIUM',
             entry_price: typeof parsed.entry_price === 'number' ? parsed.entry_price : undefined,
             stop_loss: typeof parsed.stop_loss === 'number' ? parsed.stop_loss : undefined,
@@ -478,67 +486,191 @@ Provide only the JSON response, no additional text.`;
         };
     }
 
+    /**
+     * Enhanced combinePredictions with ensemble validation
+     */
     private combinePredictions(
         llmPrediction: LLMPrediction,
         statisticalPrediction: StatisticalPrediction,
-        currentPrice: number
+        currentPrice: number,
+        technicalIndicators?: TechnicalIndicators
     ): AutonomousPredictionResult
     {
-        // Weight LLM prediction more heavily (70%) but consider statistical as backup
-        const llmWeight = 0.7;
-        const statisticalWeight = 0.3;
+        // NEW: Validate ensemble prediction before combining
+        if (technicalIndicators && !this.validateEnsemblePrediction(llmPrediction, statisticalPrediction, technicalIndicators)) {
+            console.warn('⚠️ Ensemble validation failed - using conservative approach');
+            // Return neutral/conservative prediction
+            return this.buildConservativeFallback(currentPrice);
+        }
+
+        // Weight LLM prediction more heavily (60%) with statistical as validation (40%)
+        const llmWeight = 0.6; // Reduced from 0.7 for more balance
+        const statisticalWeight = 0.4; // Increased from 0.3
         let finalDirection: 'UP' | 'DOWN' | 'NEUTRAL';
         let finalConfidence: number;
-        // If both predictions agree, boost confidence
+
+        // If both predictions agree, boost confidence but cap it
         if (llmPrediction.direction === statisticalPrediction.direction) {
             finalDirection = llmPrediction.direction;
-            finalConfidence = Math.min(0.95,
-                (llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight) + 0.1
+            finalConfidence = Math.min(0.85, // Reduced max confidence from 0.95 to 0.85
+                (llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight) + 0.05 // Reduced bonus
             );
+            console.log('✅ Model agreement detected - confidence boost applied');
         } else {
-            // If they disagree, go with LLM but reduce confidence
-            finalDirection = llmPrediction.direction;
-            finalConfidence = (llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight) * 0.5;
+            // If they disagree, use weighted average but penalize disagreement
+            finalDirection = llmPrediction.confidence > statisticalPrediction.confidence ?
+                llmPrediction.direction : statisticalPrediction.direction;
+            finalConfidence = ((llmPrediction.confidence * llmWeight) + (statisticalPrediction.confidence * statisticalWeight)) * 0.7; // Disagreement penalty
+            console.warn('⚠️ Model disagreement detected - confidence penalty applied');
         }
+
+        // Apply minimum confidence threshold
+        finalConfidence = Math.max(0.55, Math.min(0.85, finalConfidence)); // Tighter confidence range
+
         // Always return a full AutonomousPredictionResult
         return {
             symbol: 'UNKNOWN',
             timeframe: '1m',
             prediction: finalDirection === 'UP' ? 'UP' : 'DOWN',
-            confidence: Math.max(0.5, Math.min(0.95, finalConfidence)),
+            confidence: finalConfidence,
             trading_levels: {
                 entry_price: llmPrediction.entry_price || currentPrice,
-                stop_loss: llmPrediction.stop_loss || (currentPrice * 0.985),
-                take_profit: llmPrediction.take_profit || (currentPrice * 1.025),
-                risk_reward_ratio: 1.5,
+                stop_loss: llmPrediction.stop_loss || (currentPrice * (finalDirection === 'UP' ? 0.985 : 1.015)),
+                take_profit: llmPrediction.take_profit || (currentPrice * (finalDirection === 'UP' ? 1.025 : 0.975)),
+                risk_reward_ratio: 2.0, // Improved from 1.5
                 max_drawdown_pips: Math.round(Math.abs((llmPrediction.entry_price || currentPrice) - (llmPrediction.stop_loss || currentPrice * 0.985)) * 10000),
                 target_pips: Math.round(Math.abs((llmPrediction.take_profit || currentPrice * 1.025) - (llmPrediction.entry_price || currentPrice)) * 10000),
             },
             price_targets: {
-                immediate: llmPrediction.entry_price ? llmPrediction.entry_price * 1.005 : currentPrice * 1.005,
-                short_term: llmPrediction.entry_price ? llmPrediction.entry_price * 1.015 : currentPrice * 1.015,
-                medium_term: llmPrediction.entry_price ? llmPrediction.entry_price * 1.025 : currentPrice * 1.025,
+                immediate: currentPrice * (finalDirection === 'UP' ? 1.005 : 0.995),
+                short_term: currentPrice * (finalDirection === 'UP' ? 1.015 : 0.985),
+                medium_term: currentPrice * (finalDirection === 'UP' ? 1.025 : 0.975),
             },
             risk_management: {
-                position_size_suggestion: 0.02,
-                max_risk_per_trade: 0.015,
-                probability_of_success: Math.max(0.5, Math.min(0.95, finalConfidence)),
+                position_size_suggestion: Math.min(0.015, finalConfidence * 0.02), // Dynamic position sizing
+                max_risk_per_trade: 0.01, // Reduced from 0.015
+                probability_of_success: finalConfidence,
             },
-            multi_timeframe_analysis: 'LLM/statistical ensemble',
+            multi_timeframe_analysis: 'Enhanced LLM/statistical ensemble with validation',
             higher_timeframe_trend: 'SIDEWAYS',
             intermediate_timeframe_momentum: 'NEUTRAL',
-            timeframe_confluence: 'MODERATE',
-            market_structure_quality: 'MEDIUM',
-            confluence_bonus: 0.0,
-            analysis: llmPrediction.reasoning,
-            reasoning: `LLM: ${llmPrediction.reasoning} | Statistical: ${statisticalPrediction.method}`,
+            timeframe_confluence: finalConfidence > 0.75 ? 'STRONG' : 'MODERATE',
+            market_structure_quality: finalConfidence > 0.7 ? 'HIGH' : 'MEDIUM',
+            confluence_bonus: llmPrediction.direction === statisticalPrediction.direction ? 0.05 : 0.0,
+            analysis: `Enhanced Ensemble: ${llmPrediction.reasoning}`,
+            reasoning: `LLM (${(llmWeight * 100).toFixed(0)}%): ${llmPrediction.reasoning} | Statistical (${(statisticalWeight * 100).toFixed(0)}%): ${statisticalPrediction.method} | Agreement: ${llmPrediction.direction === statisticalPrediction.direction ? 'YES' : 'NO'}`,
             factors: {
-                technical: llmPrediction.confidence,
-                sentiment: 0,
-                pattern: 0,
-                confluence: 0,
-                key_factors: [ llmPrediction.reasoning, statisticalPrediction.method ],
+                technical: statisticalPrediction.confidence,
+                sentiment: llmPrediction.confidence,
+                pattern: 0.5,
+                confluence: llmPrediction.direction === statisticalPrediction.direction ? 0.8 : 0.4,
+                key_factors: [
+                    `LLM: ${llmPrediction.reasoning}`,
+                    `Statistical: ${statisticalPrediction.method}`,
+                    `Ensemble Confidence: ${finalConfidence.toFixed(2)}`
+                ],
             },
         };
+    }
+
+    /**
+     * NEW: Conservative fallback when ensemble validation fails
+     */
+    private buildConservativeFallback(currentPrice: number): AutonomousPredictionResult
+    {
+        return {
+            symbol: 'UNKNOWN',
+            timeframe: '1m',
+            prediction: 'UP', // Default to UP but with very low confidence
+            confidence: 0.5, // Neutral confidence
+            trading_levels: {
+                entry_price: currentPrice,
+                stop_loss: currentPrice * 0.995, // Tight stop
+                take_profit: currentPrice * 1.005, // Small target
+                risk_reward_ratio: 1.0,
+                max_drawdown_pips: Math.round(currentPrice * 0.005 * 10000),
+                target_pips: Math.round(currentPrice * 0.005 * 10000),
+            },
+            price_targets: {
+                immediate: currentPrice * 1.002,
+                short_term: currentPrice * 1.005,
+                medium_term: currentPrice * 1.008,
+            },
+            risk_management: {
+                position_size_suggestion: 0.005, // Very small position
+                max_risk_per_trade: 0.005,
+                probability_of_success: 0.5,
+            },
+            multi_timeframe_analysis: 'Conservative fallback - ensemble validation failed',
+            higher_timeframe_trend: 'SIDEWAYS',
+            intermediate_timeframe_momentum: 'NEUTRAL',
+            timeframe_confluence: 'WEAK',
+            market_structure_quality: 'LOW',
+            confluence_bonus: 0.0,
+            analysis: 'Conservative fallback prediction due to ensemble validation failure',
+            reasoning: 'Ensemble validation detected conflicting signals - using conservative approach',
+            factors: {
+                technical: 0.5,
+                sentiment: 0.5,
+                pattern: 0.5,
+                confluence: 0.3,
+                key_factors: [ 'Ensemble validation failed', 'Conservative approach activated' ],
+            },
+        };
+    }
+
+    /**
+     * NEW: Validate ensemble prediction alignment with technical indicators
+     */
+    private validateEnsemblePrediction(
+        llmPrediction: LLMPrediction,
+        statisticalPrediction: StatisticalPrediction,
+        technicalIndicators: TechnicalIndicators
+    ): boolean
+    {
+        console.log('🔍 Validating ensemble prediction alignment...');
+
+        // Check for conflicts with overbought/oversold conditions
+        const rsi = technicalIndicators.rsi || 50;
+
+        if (llmPrediction.direction === 'UP' && rsi > 80) {
+            console.warn('⚠️ Bullish prediction in extremely overbought conditions (RSI > 80)');
+            return false;
+        }
+
+        if (llmPrediction.direction === 'DOWN' && rsi < 20) {
+            console.warn('⚠️ Bearish prediction in extremely oversold conditions (RSI < 20)');
+            return false;
+        }
+
+        // Check MACD alignment
+        const macdSignal = technicalIndicators.macd_signal || 0;
+        if (llmPrediction.direction === 'UP' && macdSignal < -0.01) {
+            console.warn('⚠️ Bullish prediction with strong bearish MACD signal');
+            return false;
+        }
+
+        if (llmPrediction.direction === 'DOWN' && macdSignal > 0.01) {
+            console.warn('⚠️ Bearish prediction with strong bullish MACD signal');
+            return false;
+        }
+
+        // Check for agreement between models
+        const modelsAgree = llmPrediction.direction === statisticalPrediction.direction;
+        const confidenceDifference = Math.abs(llmPrediction.confidence - statisticalPrediction.confidence);
+
+        if (!modelsAgree && confidenceDifference < 0.2) {
+            console.warn('⚠️ Model disagreement with similar confidence levels');
+            return false;
+        }
+
+        // Check minimum confidence threshold
+        if (llmPrediction.confidence < 0.6 && statisticalPrediction.confidence < 0.6) {
+            console.warn('⚠️ Both models show low confidence');
+            return false;
+        }
+
+        console.log('✅ Ensemble prediction validation passed');
+        return true;
     }
 }

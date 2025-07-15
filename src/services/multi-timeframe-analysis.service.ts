@@ -12,6 +12,7 @@ export class MultiTimeframeAnalysis
      */
     async analyzeMultipleTimeframes(historicalData: DerivCandleData[], symbol: string): Promise<any>
     {
+        console.log("This is the historical data", historicalData);
         const timeframes = {
             m1: this.analyzeTimeframe(historicalData, 1),
             m5: this.analyzeTimeframe(historicalData, 5),

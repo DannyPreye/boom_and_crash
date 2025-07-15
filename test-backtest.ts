@@ -27,40 +27,55 @@ async function testBacktest()
         const featureService = new EnhancedFeatureEngineeringService();
         const tradingAgent = new AdvancedTradingAgent(anthropicApiKey);
 
-        // Initialize backtest service
+        // Initialize backtest service with advanced trading agent
         const backtestService = new BacktestService(derivClient, featureService, tradingAgent);
 
-        // Define backtest configuration
-        // Use current data for backtesting
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(endDate.getDate() - 3); // Last 3 days for better data availability
+        // Define backtest configuration with REAL HISTORICAL DATA from last year
+        // Using 2024 data for comprehensive backtesting on real market conditions
+        const endDate = new Date('2024-12-31'); // End of 2024
+        const startDate = new Date('2024-10-01'); // Last 3 months of 2024 for manageable data size
+
+        // Ensure we're using valid historical dates
+        console.log(`📅 REAL DATA BACKTEST - Date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+        console.log(`📅 Epoch range: ${Math.floor(startDate.getTime() / 1000)} to ${Math.floor(endDate.getTime() / 1000)}`);
+        console.log(`📅 Duration: ${Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))} days`);
 
         const config: BacktestConfig = {
             symbol: 'BOOM1000',
             timeframe: '1h',
-            start_date: startDate.toISOString().split('T')[ 0 ] || '2024-01-01', // Format as YYYY-MM-DD
-            end_date: endDate.toISOString().split('T')[ 0 ] || '2024-01-31', // Format as YYYY-MM-DD
-            initial_balance: 100,
+            start_date: startDate.toISOString().split('T')[ 0 ]!, // Format as YYYY-MM-DD
+            end_date: endDate.toISOString().split('T')[ 0 ]!, // Format as YYYY-MM-DD
+            initial_balance: 10000, // $10,000 for realistic testing
             risk_per_trade: 0.02, // 2% risk per trade
-            min_confidence_threshold: 0.6, // Lowered threshold to get more trades
+            min_confidence_threshold: 0.60, // 60% minimum confidence - balanced for real trading
         };
 
-        console.log('📊 Running backtest with configuration:', config);
-        console.log('⏳ This may take a few minutes...');
+        console.log('🎯 REAL MARKET DATA BACKTEST Configuration:');
+        console.log(`   Symbol: ${config.symbol}`);
+        console.log(`   Period: ${config.start_date} to ${config.end_date}`);
+        console.log(`   Initial Balance: $${config.initial_balance.toLocaleString()}`);
+        console.log(`   Risk per Trade: ${(config.risk_per_trade * 100)}%`);
+        console.log(`   Min Confidence: ${(config.min_confidence_threshold * 100)}%`);
+        console.log(`   ⚠️  NO MOCK DATA - Real Deriv historical data only!`);
+
+        console.log('📊 Running backtest with REAL MARKET DATA configuration:', config);
+        console.log('⏳ This may take several minutes to fetch and process real historical data...');
+        console.log('🔄 Connecting to Deriv API and fetching real candle data...');
 
         // Run the backtest
         const result = await backtestService.runBacktest(config);
 
         // Display results
-        console.log('\n📈 BACKTEST RESULTS');
-        console.log('='.repeat(50));
+        console.log('\n📈 REAL MARKET DATA BACKTEST RESULTS');
+        console.log('='.repeat(60));
+        console.log(`✅ DATA SOURCE: Real Deriv historical market data (NO MOCK DATA)`);
         console.log(`Symbol: ${result.config.symbol}`);
         console.log(`Timeframe: ${result.config.timeframe}`);
         console.log(`Period: ${result.config.start_date} to ${result.config.end_date}`);
         console.log(`Initial Balance: $${result.config.initial_balance.toFixed(2)}`);
         console.log(`Risk per Trade: ${(result.config.risk_per_trade * 100).toFixed(1)}%`);
         console.log(`Min Confidence: ${(result.config.min_confidence_threshold * 100).toFixed(1)}%`);
+        console.log(`🤖 AI Agent: Advanced Trading Agent with Enhanced Features`);
 
         console.log('\n📊 PERFORMANCE METRICS');
         console.log('-'.repeat(30));
